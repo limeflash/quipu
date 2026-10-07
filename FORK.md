@@ -162,7 +162,11 @@ They stay in the tree for clean rebases; nothing here depends on them.
    the same session skipped. Imported records carry `tool_name = claude-mem`:
    they rank with captured ones at session start, notes on code that was only
    read rank last. Results and the comparison below.
-7. Switch over; remove claude-mem, the Ollama proxy and the watchdog
+7. ✅ Switched over (2026-10-07): the claude-mem plugin and its marketplace
+   are uninstalled, the `claude-mem-ollama-proxy` and `claude-mem-watchdog`
+   scheduled tasks unregistered, no claude-mem process left. Kept: the
+   codebase-memory-mcp daemon, which a SessionStart hook keeps alive, not the
+   watchdog. claude-mem's one hand-written note went into engram first.
 
 ## Milestone 6 results (2026-10-07)
 
