@@ -44,8 +44,20 @@ func cmdAutocapture(cfg store.Config) {
 		autocaptureStatus(cfg.DataDir)
 	case "context":
 		autocaptureContext(cfg)
+	case "probe":
+		results, err := compress.Probe(context.Background(), cfg.DataDir)
+		if err != nil {
+			fatal(err)
+		}
+		for _, r := range results {
+			status := "FAIL"
+			if r.OK {
+				status = "ok"
+			}
+			fmt.Printf("%-4s %-28s %6.1fs  in %6d / out %5d  %s\n", status, r.Backend, r.Took.Seconds(), r.Usage.In, r.Usage.Out, r.Detail)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context")
+		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context | probe")
 		exitFunc(1)
 	}
 }

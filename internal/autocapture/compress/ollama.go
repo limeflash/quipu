@@ -27,6 +27,9 @@ type callError struct {
 }
 
 func (e *callError) Error() string {
+	if e.Status == 0 {
+		return fmt.Sprintf("%s: %s", e.Kind, e.Msg)
+	}
 	return fmt.Sprintf("%s (HTTP %d): %s", e.Kind, e.Status, e.Msg)
 }
 
