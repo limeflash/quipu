@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,6 +29,9 @@ func NewGenerator(cfg Config, dataDir string) (generator, error) {
 			c.backends = append(c.backends, backend{name: m, provider: "ollama", model: m, client: client})
 		}
 	}
+	if b, ok := codexBackend(cfg, dataDir); ok {
+		c.backends = append(c.backends, b)
+	}
 	if b, ok := claudeBackend(cfg, dataDir); ok {
 		c.backends = append(c.backends, b)
 	}
@@ -36,6 +40,19 @@ func NewGenerator(cfg Config, dataDir string) (generator, error) {
 			filepath.Join(dataDir, "ollama.key"), filepath.Join(dataDir, "claude.token"))
 	}
 	return c, nil
+}
+
+func codexBackend(cfg Config, dataDir string) (backend, bool) {
+	if (cfg.Codex.Enabled != nil && !*cfg.Codex.Enabled) || !codexLoggedIn() {
+		return backend{}, false
+	}
+	if _, err := os.Stat(cfg.Codex.Exe); err != nil {
+		if _, err := exec.LookPath(cfg.Codex.Exe); err != nil {
+			return backend{}, false
+		}
+	}
+	return backend{name: "codex:" + cfg.Codex.Model, provider: "codex", model: cfg.Codex.Model,
+		client: newCodex(cfg, dataDir), perHour: cfg.Codex.MaxCallsPerHour}, true
 }
 
 func claudeBackend(cfg Config, dataDir string) (backend, bool) {
@@ -115,7 +132,9 @@ func RunOnce(ctx context.Context, sink Sink, dataDir string, dryRun bool, out fu
 // no-op unless auto-capture is enabled. Errors go to autocapture.log, never
 // to stdout, which belongs to the MCP protocol.
 func Start(ctx context.Context, sink Sink, dataDir string) (stop func()) {
-	if !autocapture.Enabled(dataDir) {
+	// A fallback model's own process (ENGRAM_INTERNAL) must never start a
+	// second compressor.
+	if !autocapture.Enabled(dataDir) || os.Getenv("ENGRAM_INTERNAL") == "1" {
 		return func() {}
 	}
 	cfg, err := Load(dataDir)

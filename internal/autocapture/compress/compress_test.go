@@ -430,6 +430,69 @@ func TestClaudeIsTheFallbackAndHasABudget(t *testing.T) {
 	}
 }
 
+func TestCodexClient(t *testing.T) {
+	t.Setenv("CODEX_SANDBOX", "seatbelt")
+	dir := t.TempDir()
+	var gotArgs, gotEnv []string
+	var gotStdin string
+	events := `{"type":"thread.started"}` + "\n" + `{"type":"turn.completed","usage":{"input_tokens":16155,"output_tokens":135}}` + "\n"
+	reply := `{"observations":[],"summary":null}`
+	c := &codexClient{exe: "codex.exe", effort: "max", dir: dir, timeout: time.Minute,
+		run: func(_ context.Context, _ string, args []string, stdin, _ string, env []string) ([]byte, []byte, error) {
+			gotArgs, gotStdin, gotEnv = args, stdin, env
+			for i, a := range args {
+				if a == "-o" {
+					_ = os.WriteFile(args[i+1], []byte(reply), 0o600)
+				}
+			}
+			return []byte(events), nil, nil
+		}}
+	text, u, err := c.chat(context.Background(), "gpt-6-luna", "SYS", "USER", schema)
+	if err != nil || text != reply || u.In != 16155 || u.Out != 135 {
+		t.Fatalf("text=%q u=%+v err=%v", text, u, err)
+	}
+	joined := strings.Join(gotArgs, " ")
+	for _, want := range []string{"exec -m gpt-6-luna", "-c model_reasoning_effort=max", "--ignore-user-config",
+		"--disable hooks", "--ephemeral", "-s read-only", "--json", "--output-schema"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args lack %q: %s", want, joined)
+		}
+	}
+	if gotStdin != "SYS\n\nUSER" {
+		t.Fatalf("stdin %q", gotStdin)
+	}
+	if env := strings.Join(gotEnv, "\n"); strings.Contains(env, "CODEX_SANDBOX") || !strings.Contains(env, "ENGRAM_INTERNAL=1") {
+		t.Fatalf("env:\n%s", env)
+	}
+	// The schema must satisfy strict structured output and still parse with
+	// a null summary when none was asked for.
+	if r, _, err := parse(text, false); err != nil || r.Summary != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, _, err := parse(text, true); err == nil {
+		t.Fatal("null summary must be rejected when a summary was asked for")
+	}
+
+	for _, c2 := range []struct {
+		events string
+		kind   string
+	}{
+		{`{"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again at 9:00 PM."}}`, errQuota},
+		{`{"type":"error","message":"401 Unauthorized: please log in"}`, errAuth},
+		{`{"type":"turn.failed","error":{"message":"stream disconnected"}}`, errTransient},
+	} {
+		events, reply = c2.events, ""
+		_, _, err := c.chat(context.Background(), "gpt-6-luna", "s", "u", schema)
+		var ce *callError
+		if !errors.As(err, &ce) || ce.Kind != c2.kind {
+			t.Errorf("%s: got %v, want %s", c2.events, err, c2.kind)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "reply-*")); len(left) != 0 {
+		t.Fatalf("reply files left behind: %v", left)
+	}
+}
+
 func TestClaudeClient(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "http://host-relay")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "parent")
