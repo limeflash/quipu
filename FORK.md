@@ -145,9 +145,27 @@ machine. What the review of run 1 changed:
   excluded in the prompt; at most 8 records per call.
 
 Known gaps: session summaries need the Stop hook (installed after this run);
-SessionStart context injection is not wired yet (`engram context` is ~1.7k
-tokens of recent snippets, more than the 800-token index the design wants);
 a formal junk audit waits for a few days of data.
+
+### SessionStart injection
+
+`engram autocapture context` (Claude Code SessionStart hook, ~1.2 s on
+Windows, mostly opening the store) injects a fenced block of at most ~800
+tokens, built so memories never cross over:
+
+- **one project**: the one the session's working directory resolves to, by the
+  same detection the compressor uses; an ambiguous or unknown directory gets
+  nothing rather than a guess;
+- **this session vs others**: a resumed or compacted session sees its own
+  summary first; other sessions' summaries are labelled with their id and age
+  and flagged "may still be running in parallel" when updated in the last 30
+  minutes;
+- then record titles only (`#id [type] title`), agent-written first, then
+  decisions / fixes / config, then the rest.
+
+Other projects are deliberately absent from the block; asked to look further,
+the agent uses `mem_search(query, all_projects=true)` or `mem_list_projects`,
+which the block mentions.
 
 ## Syncing with upstream
 

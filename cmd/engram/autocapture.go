@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,10 +42,39 @@ func cmdAutocapture(cfg store.Config) {
 		}
 	case "status":
 		autocaptureStatus(cfg.DataDir)
+	case "context":
+		autocaptureContext(cfg)
 	default:
-		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status")
+		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context")
 		exitFunc(1)
 	}
+}
+
+// autocaptureContext is the Claude Code SessionStart hook: hook JSON in,
+// additionalContext out. Any failure prints nothing — a session must never
+// fail to start because of memory.
+func autocaptureContext(cfg store.Config) {
+	var in struct {
+		SessionID string `json:"session_id"`
+		CWD       string `json:"cwd"`
+		Source    string `json:"source"`
+	}
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil || json.Unmarshal(data, &in) != nil || in.SessionID == "" {
+		return
+	}
+	s, err := storeNew(cfg)
+	if err != nil {
+		return
+	}
+	defer s.Close()
+	block := compress.SessionContext(s, in.SessionID, in.CWD, in.Source, time.Now().UTC())
+	if block == "" {
+		return
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"hookSpecificOutput": map[string]string{"hookEventName": "SessionStart", "additionalContext": block},
+	})
 }
 
 func autocaptureStatus(dataDir string) {
