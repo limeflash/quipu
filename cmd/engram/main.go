@@ -809,6 +809,10 @@ func main() {
 			fatal(err)
 		}
 	case "import":
+		if len(os.Args) > 2 && os.Args[2] == "claude-mem" {
+			cmdImportClaudeMem(cfg, os.Args[3:])
+			return
+		}
 		cmdImport(cfg)
 	case "sync":
 		cmdSync(cfg)

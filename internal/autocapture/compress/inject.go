@@ -24,6 +24,11 @@ const (
 	recentScanned = 120
 )
 
+// ImportToolName marks records brought over by `engram import claude-mem`.
+// They rank with captured records, and their notes on code that was only
+// read rank last.
+const ImportToolName = "claude-mem"
+
 // SessionContext builds the block injected at SessionStart, or "" when there
 // is nothing safe to say. Two rules keep memories from crossing over:
 //
@@ -67,18 +72,28 @@ func SessionContext(r Reader, dataDir, sessionID, cwd, source string, now time.T
 		}
 	}
 	// Summaries evolve in place, so recency is updated_at, not created_at.
+	// One line per session: the agent's own summary, the captured one and
+	// imported per-turn summaries can all exist for the same session.
 	sort.SliceStable(others, func(i, j int) bool { return others[i].UpdatedAt > others[j].UpdatedAt })
-	if len(others) > maxOthers {
-		others = others[:maxOthers]
+	shown := map[string]bool{}
+	kept := others[:0]
+	for _, o := range others {
+		if !shown[o.SessionID] && len(kept) < maxOthers {
+			shown[o.SessionID] = true
+			kept = append(kept, o)
+		}
 	}
+	others = kept
 	// What the agent chose to save outranks what was captured; decisions and
 	// fixes outrank discoveries. Recency orders each group.
 	rank := func(o store.Observation) int {
 		switch {
-		case o.ToolName == nil || *o.ToolName != ToolName:
+		case o.ToolName == nil || *o.ToolName != ToolName && *o.ToolName != ImportToolName:
 			return 0
 		case evolvingTypes[o.Type] || o.Type == "bugfix":
 			return 1
+		case o.Type == "discovery" && *o.ToolName == ImportToolName:
+			return 3
 		}
 		return 2
 	}

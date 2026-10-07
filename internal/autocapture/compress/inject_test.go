@@ -146,3 +146,29 @@ func TestBudgetAndFence(t *testing.T) {
 		t.Fatalf("recalled text closed the fence:\n%s", out)
 	}
 }
+
+func TestImportedRecordsRankAndOneLinePerSession(t *testing.T) {
+	imp, auto := key(ImportToolName), key(ToolName)
+	r := &fakeReader{byProject: map[string][]store.Observation{"server": {
+		{ID: 1, SessionID: "old", Type: "session_summary", Content: "## Goal\nlast turn", UpdatedAt: ts(time.Hour), ToolName: imp},
+		{ID: 2, SessionID: "old", Type: "session_summary", Content: "## Goal\nearlier turn", UpdatedAt: ts(2 * time.Hour), ToolName: imp},
+		{ID: 3, SessionID: "older", Type: "session_summary", Content: "## Goal\nanother session", UpdatedAt: ts(3 * time.Hour), ToolName: imp},
+		{ID: 4, Type: "discovery", Title: "read the parser", CreatedAt: ts(time.Minute), ToolName: imp},
+		{ID: 5, Type: "change", Title: "imported change", CreatedAt: ts(time.Hour), ToolName: imp},
+		{ID: 6, Type: "discovery", Title: "captured discovery", CreatedAt: ts(2 * time.Hour), ToolName: auto},
+		{ID: 7, Type: "decision", Title: "imported decision", CreatedAt: ts(3 * time.Hour), ToolName: imp},
+	}}}
+	out := SessionContext(r, "", "new", `C:\code\server`, "startup", now0)
+	if strings.Contains(out, "earlier turn") || !strings.Contains(out, "last turn") || !strings.Contains(out, "another session") {
+		t.Fatalf("one line per other session, its latest summary:\n%s", out)
+	}
+	order := []string{"#7 [decision]", "#5 [change]", "#6 [discovery]", "#4 [discovery]"}
+	last := -1
+	for _, o := range order {
+		i := strings.Index(out, o)
+		if i < 0 || i < last {
+			t.Fatalf("want order %v (an imported note on read code last):\n%s", order, out)
+		}
+		last = i
+	}
+}

@@ -43,6 +43,10 @@ func TestRedactsSecrets(t *testing.T) {
 			"7. absorb 8. abstract 9. absurd 10. abuse 11. access 12. accident"},
 		{"seed newline separated", "abandon\nability\nable\nabout\nabove\nabsent\nabsorb\nabstract\nabsurd\nabuse\naccess\naccident"},
 		{"seed labelled", "mnemonic: abandon ability able about above absent absorb abstract absurd abuse access accident"},
+		// all letters, but a config value ends its line or is quoted
+		{"dotenv letters only", "DB_PASSWORD=supersecretpassword\nDB_HOST=x"},
+		{"yaml letters only", "password: swordfishes"},
+		{"json letters only", `{"password": "swordfishes", "user": "app"}`},
 	}
 	for _, c := range cases {
 		out, hits := Text(c.in)
@@ -77,6 +81,14 @@ func TestLeavesNonSecretsAlone(t *testing.T) {
 			"display can update, which is absurd but useful when the actual index is ready"},
 		{"short bip39 run", "able about above absent absorb"},
 		{"code identifiers", `const access = require("./access"); return access.ready && index.valid`},
+		// model-written prose about secrets (claude-mem narratives)
+		{"password prose word", "Password: encrypted by the store before being handed over"},
+		{"secret column list", "accounts store encrypted secrets: password_encrypted, mafile_content_encrypted"},
+		{"token prose", "the webapi_token: retrieved via pointssummary"},
+		{"css design tokens", "Design tokens: --surface-bg #09080f, card #100e19"},
+		{"dotted scope list", "SETTINGS_API_KEY_SCOPES: fleet.read, accounts.read, metrics.read"},
+		{"date format", "log lines embed `date -u +%H:%M:%S` timestamps"},
+		{"earlier placeholder", "socks5://user:[SECRET:url-credentials]@host and APP_SECRET=[SECRET:assigned-secret] here"},
 		{"long technical prose", "The indexing pipeline runs in memory, releases the buffer after the write, " +
 			"and reports partial parses so the caller can fall back to text search when " +
 			"a file was only partially understood by the parser during the second pass"},
