@@ -13,6 +13,19 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Edit|MultiEdit|Write|NotebookEdit|Bash|PowerShell|Read|NotebookRead|Grep|Glob|LS|WebFetch|WebSearch|mcp__.+)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "engram-capture",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|fork",
