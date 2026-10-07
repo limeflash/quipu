@@ -69,7 +69,9 @@ On one Windows 11 machine, 7 October 2026, the same four working sessions — cl
 
 The audit was done by a separate model that saw the two samples as lists A and B. Hook cost per tool call: `engram-capture` 41 ms p50 / 46 ms p95 for an edit, 55 / 62 ms for a command with 200 KB of output — against ~120 ms for the full 30 MB `engram` binary, because on Windows process start scales with image size.
 
-Known gaps: noise was 25% against a target under 20% — minor UI polish recorded without a cause, and the same bug written twice by two chunks of one session. The second is fixed since: a later chunk now names the record it continues and rewrites it (old text kept in the version history). Whether quipu misses facts that matter needs the recall test that is still to be built. Details: [FORK.md](FORK.md).
+Known gaps: noise was 25% against a target under 20% — minor UI polish recorded without a cause, and the same bug written twice by two chunks of one session. The second is fixed since: a later chunk now names the record it continues and rewrites it (old text kept in the version history).
+
+Recall test, 48 questions written from six real sessions' dialogue and answered from memory alone: 21 correct, 20 partial, 0 wrong, 7 not found — and of the 48 facts none was missing from memory entirely (7 stored in part). What fails is finding them: the main change between the first run's 12 correct and the second's 21 was letting search fall back from all-terms to any-term matching. Details: [FORK.md](FORK.md).
 
 ## Install
 

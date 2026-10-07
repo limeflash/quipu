@@ -70,7 +70,7 @@ judgement turns into. So both stay, with agent saves ranking first:
 | 7 | **Project profile**: stack from manifests, commands from successful runs, hot files from touches | `internal/autocapture/profile` |
 | 8 | **Codex capture**: `exec` events, edits detected as `apply_patch`, read-only commands dropped | `plugin/codex` + `hook codex-post-tool-use` |
 | 9 | `engram import claude-mem` | `cmd/engram/import_claudemem.go` ✅ |
-| 10 | Eval harness: recall set, junk audit, token cost, hook p95 | `internal/autocapture/eval` |
+| 10 | Eval: recall test (48 questions from real sessions, Haiku answers, Sonnet judge), blind junk audit, token cost, hook p95 | FORK.md results; data local in `~/.engram/eval` |
 
 The conflict judge (`ENGRAM_AGENT_CLI`) also gets the Ollama runner, so
 judging stops costing Claude Haiku calls.
@@ -232,6 +232,49 @@ The same day: the compressor used to look for the session summary and the
 session with imported claude-mem history are months old — the summary was
 never found and restarted every turn. It now reads the session most recently
 updated first (`RecentSessionObservations`).
+
+### Recall test (2026-10-08)
+
+Does quipu keep the facts a later session needs? Six real sessions captured
+by quipu (Android TV app, this fork, a VPN panel, a Steam trading panel, a home
+automation setup); their user–agent dialogue after capture began — tool output
+removed — is the ground truth. A Sonnet 5.5 agent per session wrote 8–10
+questions the owner would plausibly ask later (decisions and why, bug causes
+and fixes, config and paths, gotchas, unfinished work), each with key facts
+and a quote: 48 in all. Haiku 5.5 agents answered them from memory only —
+`mem_search` / `mem_get_observation`, at most three calls a question, no file
+access — and a Sonnet 5.5 judge graded each answer and, for every miss,
+searched memory itself to tell *not stored* from *stored but not found*.
+Questions, answers and grades stay on the machine (`~/.engram/eval/`); they
+are about private projects.
+
+| | correct | partial | wrong | not found |
+|---|---|---|---|---|
+| first run | 12 | 14 | 5 | 17 |
+| after the fixes below | **21** | 20 | **0** | 7 |
+
+Whether the fact was stored at all (judge's search): **not stored 0 of 48**
+in both runs; 7 stored only in part (a number, a per-device setting, one step
+of a procedure). The misses were nearly all on the way out:
+
+- **search**: the default all-terms match returned nothing as soon as one of
+  the agent's keywords was not in the record. `mem_search` and `engram search`
+  now fall back to any-term BM25 when all-terms finds nothing
+  (`store.AllThenAny`; `Store.Search` keeps upstream's strict default because
+  callers use it to prove absence). Retrieval misses went 22 → 14;
+- **project**: 6 facts sit under the working directory's project instead of
+  the repository the work was about — decisions made in conversation, with no
+  file edited, follow the shell's cwd. The SessionStart block points the agent
+  to `all_projects=true`; the answering agent here used it only as a last call;
+- **the answering agent**: the remaining retrieval misses are answers built on
+  a record's preview or an older record while the newer one was one call away.
+
+The test also contaminated what it measured: the agents wrote the question
+and answer files, the capture hook saw those writes as work, and the
+compressor turned the answer key into memories. The hook now drops every
+event whose target lies inside the data directory, and those records were
+soft-deleted before the second run. Discussing answers in a captured session
+leaks them the same way — a rerun needs fresh questions.
 
 ## Milestone 2 results (2026-10-07, real sessions, deepseek-v4.1-flash)
 
