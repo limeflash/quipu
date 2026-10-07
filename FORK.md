@@ -110,7 +110,13 @@ They stay in the tree for clean rebases; nothing here depends on them.
    (the eval harness moves to milestone 2 — there is nothing to evaluate until
    observations are generated)
 2. ✅ Ollama runner + compressor + turn summaries (Claude Code) — results below
-3. Claude Sonnet fallback + budget
+3. ✅ Claude Sonnet fallback + budget: `claude -p --model claude-sonnet-5-5
+   --effort high --json-schema … --system-prompt … --tools "" --strict-mcp-config
+   --disable-slash-commands --settings {"disableAllHooks":true}
+   --no-session-persistence`, inherited `ANTHROPIC_*` / `CLAUDE*` scrubbed,
+   token from `claude setup-token` in `~/.engram/claude.token`, 20 calls/hour.
+   A bad credential disables only its own provider. `engram autocapture probe`
+   checks every backend.
 4. Codex capture
 5. Project profile
 6. `import claude-mem`; side-by-side quality run against claude-mem

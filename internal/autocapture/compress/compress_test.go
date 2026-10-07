@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -336,6 +337,14 @@ func (s *scriptedChat) chat(_ context.Context, model, _, user string, _ json.Raw
 	return text, usage{In: 10, Out: 1}, err
 }
 
+func ollamaBackends(chat chatter, models ...string) []backend {
+	var bs []backend
+	for _, m := range models {
+		bs = append(bs, backend{name: m, provider: "ollama", model: m, client: chat})
+	}
+	return bs
+}
+
 func TestChainFallsThroughAndRemembers(t *testing.T) {
 	dir := t.TempDir()
 	chat := &scriptedChat{reply: func(model string, n int) (string, error) {
@@ -350,7 +359,7 @@ func TestChainFallsThroughAndRemembers(t *testing.T) {
 		}
 		return `{"observations":[]}`, nil
 	}}
-	c := &chain{models: []string{"old", "busy", "good"}, client: chat, st: loadState(dir), dataDir: dir, now: func() time.Time { return t0 }}
+	c := &chain{backends: ollamaBackends(chat, "old", "busy", "good"), st: loadState(dir), dataDir: dir, now: func() time.Time { return t0 }}
 	_, info, err := c.generate(context.Background(), "sys", "user", false)
 	if err != nil || info.Model != "good" || info.Attempts != 2 {
 		t.Fatalf("info=%+v err=%v", info, err)
@@ -370,11 +379,98 @@ func TestChainFallsThroughAndRemembers(t *testing.T) {
 	}
 }
 
-func TestChainStopsOnAuth(t *testing.T) {
-	chat := &scriptedChat{reply: func(string, int) (string, error) { return "", &callError{Kind: errAuth, Status: 401} }}
-	c := &chain{models: []string{"a", "b"}, client: chat, st: loadState(t.TempDir()), dataDir: t.TempDir(), now: time.Now}
-	if _, _, err := c.generate(context.Background(), "s", "u", false); !errors.Is(err, errNoModel) || len(chat.calls) != 1 {
-		t.Fatalf("auth failure must stop the chain: err=%v calls=%d", err, len(chat.calls))
+// A bad credential disables its own provider only: the Ollama key failing must
+// not keep the Claude fallback from running.
+func TestAuthFailureSkipsOnlyItsProvider(t *testing.T) {
+	ollama := &scriptedChat{reply: func(string, int) (string, error) { return "", &callError{Kind: errAuth, Status: 401} }}
+	claude := &scriptedChat{reply: func(string, int) (string, error) { return `{"observations":[]}`, nil }}
+	bs := append(ollamaBackends(ollama, "a", "b"), backend{name: "claude:sonnet", provider: "claude", model: "sonnet", client: claude})
+	c := &chain{backends: bs, st: loadState(t.TempDir()), dataDir: t.TempDir(), now: time.Now}
+	_, info, err := c.generate(context.Background(), "s", "u", false)
+	if err != nil || info.Model != "claude:sonnet" || len(ollama.calls) != 1 {
+		t.Fatalf("err=%v model=%q ollama calls=%d (second Ollama model must be skipped)", err, info.Model, len(ollama.calls))
+	}
+	only := &chain{backends: ollamaBackends(ollama, "a"), st: loadState(t.TempDir()), dataDir: t.TempDir(), now: time.Now}
+	if _, _, err := only.generate(context.Background(), "s", "u", false); !errors.Is(err, errNoModel) {
+		t.Fatalf("with no other provider the drain must stop: %v", err)
+	}
+}
+
+func TestClaudeIsTheFallbackAndHasABudget(t *testing.T) {
+	dir := t.TempDir()
+	clock := t0
+	ollama := &scriptedChat{reply: func(string, int) (string, error) { return "", &callError{Kind: errQuota, Status: 429} }}
+	claude := &scriptedChat{reply: func(string, int) (string, error) { return `{"observations":[]}`, nil }}
+	bs := append(ollamaBackends(ollama, "deepseek"), backend{name: "claude:sonnet", provider: "claude", model: "sonnet", client: claude, perHour: 2})
+	c := &chain{backends: bs, st: loadState(dir), dataDir: dir, now: func() time.Time { return clock }}
+	for i := 0; i < 2; i++ {
+		if _, info, err := c.generate(context.Background(), "s", "u", false); err != nil || info.Model != "claude:sonnet" {
+			t.Fatalf("call %d: model=%q err=%v", i, info.Model, err)
+		}
+	}
+	if len(ollama.calls) != 1 {
+		t.Fatalf("a model out of quota must be skipped while it backs off, called %d times", len(ollama.calls))
+	}
+	if _, _, err := c.generate(context.Background(), "s", "u", false); !errors.Is(err, errNoModel) || len(claude.calls) != 2 {
+		t.Fatalf("the hourly budget must stop the third Claude call: err=%v calls=%d", err, len(claude.calls))
+	}
+	clock = t0.Add(61 * time.Minute)
+	ollama.reply = func(string, int) (string, error) { return `{"observations":[]}`, nil }
+	if _, info, err := c.generate(context.Background(), "s", "u", false); err != nil || info.Model != "deepseek" {
+		t.Fatalf("after an hour Ollama is retried first: model=%q err=%v", info.Model, err)
+	}
+}
+
+func TestClaudeClient(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "http://host-relay")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "parent")
+	dir := t.TempDir()
+	var gotArgs, gotEnv []string
+	var gotStdin, gotDir string
+	reply := `{"type":"result","is_error":false,"result":"","structured_output":{"observations":[]},"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":5}}`
+	var runErr error
+	c := &claudeClient{exe: "claude", effort: "high", token: "tok", dir: dir, timeout: time.Minute,
+		run: func(_ context.Context, _ string, args []string, stdin, d string, env []string) ([]byte, []byte, error) {
+			gotArgs, gotStdin, gotDir, gotEnv = args, stdin, d, env
+			return []byte(reply), nil, runErr
+		}}
+	text, u, err := c.chat(context.Background(), "claude-sonnet-5-5", "SYS", "USER", schema)
+	if err != nil || text != `{"observations":[]}` || u.In != 1110 || u.Out != 5 {
+		t.Fatalf("text=%q u=%+v err=%v", text, u, err)
+	}
+	joined := strings.Join(gotArgs, "\x1f")
+	for _, want := range []string{"-p", "--model\x1fclaude-sonnet-5-5", "--effort\x1fhigh", "--system-prompt\x1fSYS",
+		"--tools\x1f\x1f", "--strict-mcp-config", "--no-session-persistence", `{"disableAllHooks":true}`, "--json-schema"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args lack %q: %q", want, gotArgs)
+		}
+	}
+	env := strings.Join(gotEnv, "\n")
+	if strings.Contains(env, "ANTHROPIC_BASE_URL") || strings.Contains(env, "CLAUDE_CODE_SESSION_ID") ||
+		!strings.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN=tok") || !strings.Contains(env, "ENGRAM_INTERNAL=1") {
+		t.Fatalf("env not scrubbed / token missing:\n%s", env)
+	}
+	if gotStdin != "USER" || gotDir != dir {
+		t.Fatalf("stdin=%q dir=%q", gotStdin, gotDir)
+	}
+
+	for _, c2 := range []struct {
+		reply string
+		err   error
+		kind  string
+	}{
+		{`{"is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}`, errors.New("exit status 1"), errAuth},
+		{`{"is_error":true,"result":"Claude AI usage limit reached|1791400000"}`, errors.New("exit status 1"), errQuota},
+		{`{"is_error":true,"result":"API Error: 529 Overloaded"}`, nil, errTransient},
+		{"", exec.ErrNotFound, errRetired},
+		{`{"is_error":false,"result":""}`, nil, errOutput},
+	} {
+		reply, runErr = c2.reply, c2.err
+		_, _, err := c.chat(context.Background(), "m", "s", "u", schema)
+		var ce *callError
+		if !errors.As(err, &ce) || ce.Kind != c2.kind {
+			t.Errorf("reply %q: got %v, want %s", c2.reply, err, c2.kind)
+		}
 	}
 }
 

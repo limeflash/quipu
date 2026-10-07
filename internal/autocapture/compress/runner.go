@@ -18,14 +18,78 @@ const (
 	staleLock = 15 * time.Minute
 )
 
-// NewGenerator builds the model chain from config and stored model health.
+// NewGenerator builds the backend chain — Ollama models, then Claude — from
+// config, credentials and stored health.
 func NewGenerator(cfg Config, dataDir string) (generator, error) {
-	key := ollamaKey(dataDir)
-	if key == "" {
-		return nil, fmt.Errorf("no Ollama key: set OLLAMA_API_KEY or put it in %s", filepath.Join(dataDir, "ollama.key"))
+	c := &chain{st: loadState(dataDir), dataDir: dataDir, now: time.Now}
+	if key := ollamaKey(dataDir); key != "" {
+		client := newOllama(cfg, key)
+		for _, m := range cfg.Ollama.Models {
+			c.backends = append(c.backends, backend{name: m, provider: "ollama", model: m, client: client})
+		}
 	}
-	return &chain{models: cfg.Ollama.Models, client: newOllama(cfg, key), st: loadState(dataDir),
-		dataDir: dataDir, now: time.Now}, nil
+	if b, ok := claudeBackend(cfg, dataDir); ok {
+		c.backends = append(c.backends, b)
+	}
+	if len(c.backends) == 0 {
+		return nil, fmt.Errorf("no model configured: put an Ollama key in %s and/or a `claude setup-token` token in %s",
+			filepath.Join(dataDir, "ollama.key"), filepath.Join(dataDir, "claude.token"))
+	}
+	return c, nil
+}
+
+func claudeBackend(cfg Config, dataDir string) (backend, bool) {
+	token := claudeToken(dataDir)
+	if token == "" || (cfg.Claude.Enabled != nil && !*cfg.Claude.Enabled) {
+		return backend{}, false
+	}
+	return backend{name: "claude:" + cfg.Claude.Model, provider: "claude", model: cfg.Claude.Model,
+		client: newClaude(cfg, dataDir, token), perHour: cfg.Claude.MaxCallsPerHour}, true
+}
+
+// ProbeResult is one backend's answer to a tiny test call.
+type ProbeResult struct {
+	Backend string
+	OK      bool
+	Detail  string
+	Took    time.Duration
+	Usage   usage
+}
+
+// Probe sends every configured backend one small request, bypassing health
+// state and budgets, so a user can check credentials right after setting
+// them up.
+func Probe(ctx context.Context, dataDir string) ([]ProbeResult, error) {
+	cfg, err := Load(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	g, err := NewGenerator(cfg, dataDir)
+	if err != nil {
+		return nil, err
+	}
+	var out []ProbeResult
+	user := "Project: probe\n\n## Activity\n### 12:00 Edit db/store.go\n--- old\nbusy_timeout=0\n+++ new\nbusy_timeout=5000\n" +
+		"--- output\nfixes 'database is locked' with three parallel sessions\n"
+	for _, b := range g.(*chain).backends {
+		start := time.Now()
+		text, u, err := b.client.chat(ctx, b.model, system(cfg.Language, false), user, schema)
+		r := ProbeResult{Backend: b.name, Took: time.Since(start), Usage: u}
+		if err == nil {
+			var res result
+			if res, _, err = parse(text, false); err == nil {
+				r.OK, r.Detail = true, fmt.Sprintf("%d record(s)", len(res.Observations))
+				if len(res.Observations) > 0 {
+					r.Detail += ": " + res.Observations[0].Title
+				}
+			}
+		}
+		if err != nil {
+			r.Detail = err.Error()
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // RunOnce drains the spool once under the cross-process lock. ok is false

@@ -20,6 +20,17 @@ type Config struct {
 		Models []string `json:"models"` // tried in order
 		Think  []string `json:"think"`  // model-name prefixes that must run with thinking on
 	} `json:"ollama"`
+	// Claude is the fallback when every Ollama model is out of quota. It is on
+	// whenever a token from `claude setup-token` is available, unless
+	// "enabled": false.
+	Claude struct {
+		Enabled         *bool  `json:"enabled"`
+		Model           string `json:"model"`
+		Effort          string `json:"effort"`
+		MaxCallsPerHour int    `json:"max_calls_per_hour"` // it spends the user's Claude plan
+		Exe             string `json:"exe"`
+		TimeoutSecs     int    `json:"timeout_secs"`
+	} `json:"claude"`
 	Language      string `json:"language"`
 	MaxBatchChars int    `json:"max_batch_chars"` // activity text per model call
 	MaxEvents     int    `json:"max_events"`      // flush a still-running turn at this many events
@@ -48,6 +59,19 @@ func Load(dataDir string) (Config, error) {
 	if c.Ollama.Think == nil {
 		c.Ollama.Think = []string{"glm-"}
 	}
+	if c.Claude.Model == "" {
+		c.Claude.Model = "claude-sonnet-5-5"
+	}
+	if c.Claude.Effort == "" {
+		c.Claude.Effort = "high"
+	}
+	if c.Claude.MaxCallsPerHour <= 0 {
+		c.Claude.MaxCallsPerHour = 20
+	}
+	if c.Claude.TimeoutSecs <= 0 {
+		c.Claude.TimeoutSecs = 300
+	}
+	c.Claude.Exe = claudeExe(c.Claude.Exe)
 	if c.Language == "" {
 		c.Language = "English"
 	}

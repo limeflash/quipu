@@ -30,13 +30,14 @@ type callInfo struct {
 }
 
 type modelState struct {
-	BlockedUntil time.Time `json:"blocked_until,omitempty"`
-	Strikes      int       `json:"strikes,omitempty"`
-	Disabled     bool      `json:"disabled,omitempty"`
-	LastError    string    `json:"last_error,omitempty"`
+	BlockedUntil time.Time   `json:"blocked_until,omitempty"`
+	Strikes      int         `json:"strikes,omitempty"`
+	Disabled     bool        `json:"disabled,omitempty"`
+	LastError    string      `json:"last_error,omitempty"`
+	Calls        []time.Time `json:"calls,omitempty"` // last hour, for budgeted backends
 }
 
-// stateFile persists per-model health across processes and restarts.
+// stateFile persists per-backend health across processes and restarts.
 // ponytail: last writer wins between concurrent drains; a lost backoff only
 // costs one extra refused call.
 const stateFile = "autocapture-state.json"
@@ -64,34 +65,47 @@ func (st *state) save(dataDir string) {
 	}
 }
 
-func (st *state) get(model string) *modelState {
-	if st.Models[model] == nil {
-		st.Models[model] = &modelState{}
+func (st *state) get(name string) *modelState {
+	if st.Models[name] == nil {
+		st.Models[name] = &modelState{}
 	}
-	return st.Models[model]
+	return st.Models[name]
 }
 
-// chain tries the configured models in order, honouring their state.
+// backend is one model behind one provider.
+type backend struct {
+	name     string // state key and log label
+	provider string // a bad credential disables every backend of its provider
+	model    string
+	client   chatter
+	perHour  int // call budget; 0 = unlimited
+}
+
+// chain tries the backends in order — Ollama models first, Claude last —
+// honouring their health and budgets.
 type chain struct {
-	models  []string
-	client  chatter
-	st      *state
-	dataDir string
-	now     func() time.Time
+	backends []backend
+	st       *state
+	dataDir  string
+	now      func() time.Time
 }
 
 func (c *chain) generate(ctx context.Context, sys, user string, wantSummary bool) (result, callInfo, error) {
 	now := c.now()
 	defer c.st.save(c.dataDir)
 	var lastErr error
-	for _, m := range c.models {
-		ms := c.st.get(m)
-		if ms.Disabled || now.Before(ms.BlockedUntil) {
+	badProvider := map[string]bool{}
+	for _, b := range c.backends {
+		ms := c.st.get(b.name)
+		if badProvider[b.provider] || ms.Disabled || now.Before(ms.BlockedUntil) || !c.withinBudget(b, ms, now) {
 			continue
 		}
 		prompt, total := user, usage{}
 		for attempt := 1; attempt <= 2; attempt++ {
-			text, u, err := c.client.chat(ctx, m, sys, prompt, schema)
+			if b.perHour > 0 {
+				ms.Calls = append(ms.Calls, now)
+			}
+			text, u, err := b.client.chat(ctx, b.model, sys, prompt, schema)
 			total.In, total.Out = total.In+u.In, total.Out+u.Out
 			if err == nil {
 				var r result
@@ -99,17 +113,20 @@ func (c *chain) generate(ctx context.Context, sys, user string, wantSummary bool
 				r, dropped, err = parse(text, wantSummary)
 				if err == nil {
 					ms.Strikes, ms.LastError = 0, ""
-					return r, callInfo{Model: m, Usage: total, Dropped: dropped, Attempts: attempt}, nil
+					return r, callInfo{Model: b.name, Usage: total, Dropped: dropped, Attempts: attempt}, nil
 				}
 				err = &callError{Kind: errOutput, Status: 200, Msg: err.Error()}
 			}
-			lastErr = err
+			lastErr = fmt.Errorf("%s: %w", b.name, err)
 			var ce *callError
 			if !errors.As(err, &ce) || ce.Kind != errOutput {
-				c.penalize(ms, ce, now)
+				penalize(ms, ce, now)
 				if ce != nil && ce.Kind == errAuth {
-					return result{}, callInfo{Model: m, Usage: total}, fmt.Errorf("%w: %v", errNoModel, err)
+					badProvider[b.provider] = true
 				}
+				break
+			}
+			if attempt == 2 || !c.withinBudget(b, ms, now) {
 				break
 			}
 			// One repair round: show the model why its reply was refused.
@@ -118,12 +135,32 @@ func (c *chain) generate(ctx context.Context, sys, user string, wantSummary bool
 		}
 	}
 	if lastErr == nil {
-		lastErr = errors.New("every model is blocked, retired or misconfigured")
+		lastErr = errors.New("every backend is blocked, retired, over budget or not configured")
 	}
 	return result{}, callInfo{}, fmt.Errorf("%w: %v", errNoModel, lastErr)
 }
 
-func (c *chain) penalize(ms *modelState, ce *callError, now time.Time) {
+// withinBudget keeps the last hour of calls and blocks the backend until the
+// oldest one ages out once the hourly budget is spent.
+func (c *chain) withinBudget(b backend, ms *modelState, now time.Time) bool {
+	if b.perHour <= 0 {
+		return true
+	}
+	kept := ms.Calls[:0]
+	for _, t := range ms.Calls {
+		if now.Sub(t) < time.Hour {
+			kept = append(kept, t)
+		}
+	}
+	ms.Calls = kept
+	if len(kept) >= b.perHour {
+		ms.BlockedUntil = kept[0].Add(time.Hour)
+		return false
+	}
+	return true
+}
+
+func penalize(ms *modelState, ce *callError, now time.Time) {
 	if ce == nil {
 		ms.BlockedUntil = now.Add(2 * time.Minute)
 		return
