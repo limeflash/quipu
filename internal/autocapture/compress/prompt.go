@@ -30,7 +30,7 @@ Do not record:
 - routine reads, formatting-only edits, attempts that were abandoned or reverted, trivial compile errors
 - status snapshots that will be stale tomorrow: "tests pass", counts, sizes, "X was verified/works"
 - the mere fact that something was committed, pushed or deployed (keep the reusable command, if any, inside a config record)
-- things obvious from the code itself, or anything under "Already recorded"
+- things obvious from the code itself, or anything under "Already recorded" that this log adds nothing to
 
 One record per topic: merge every event about the same thing into it. Fewer, richer records beat many thin ones — usually 0 to 5 per log, never more than 8. An empty list is the right answer when nothing durable happened.
 
@@ -42,6 +42,7 @@ Each record:
 - where: files, functions, components or commands involved
 - learned: the gotcha or lesson, if any ("" otherwise)
 - topic_key: only for decision, architecture, config or pattern records that a later session will revise, as "family/short-name" in lowercase kebab-case; a later record with the same key REPLACES this one, so never reuse a key for a different subject, and when you do reuse one (see "Already recorded"), restate the complete current record, not just the change. "" for everything else
+- updates: the #id of a record under "Already recorded" that this one continues — the same bug, measurement, decision or component, now with a cause, a fix, a better number or a correction. Write the complete merged record (everything the old one said that still holds, plus what is new); it replaces that record. null when the subject is new
 
 Write in %s. Keep identifiers, paths and commands verbatim. Never reproduce secret values; [SECRET:...] placeholders mark removed ones.
 
@@ -55,9 +56,9 @@ The agent's turn has ended. Also return "summary": the state of the whole sessio
 
 // schema is sent as Ollama's "format". Cloud models currently ignore it, so
 // parse() validates everything itself; the schema documents the contract.
-var schema = json.RawMessage(`{"type":"object","properties":{"observations":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["decision","architecture","bugfix","feature","refactor","config","pattern","discovery","learning"]},"title":{"type":"string"},"what":{"type":"string"},"why":{"type":"string"},"where":{"type":"string"},"learned":{"type":"string"},"topic_key":{"type":"string"}},"required":["type","title","what"]}},"summary":{"type":"object","properties":{"goal":{"type":"string"},"discoveries":{"type":"array","items":{"type":"string"}},"accomplished":{"type":"array","items":{"type":"string"}},"next_steps":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"}}}}},"required":["observations"]}`)
+var schema = json.RawMessage(`{"type":"object","properties":{"observations":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["decision","architecture","bugfix","feature","refactor","config","pattern","discovery","learning"]},"title":{"type":"string"},"what":{"type":"string"},"why":{"type":"string"},"where":{"type":"string"},"learned":{"type":"string"},"topic_key":{"type":"string"},"updates":{"type":"integer"}},"required":["type","title","what"]}},"summary":{"type":"object","properties":{"goal":{"type":"string"},"discoveries":{"type":"array","items":{"type":"string"}},"accomplished":{"type":"array","items":{"type":"string"}},"next_steps":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"}}}}},"required":["observations"]}`)
 
-const shapeHint = `{"observations":[{"type":"bugfix","title":"...","what":"...","why":"...","where":"...","learned":"...","topic_key":""}]}`
+const shapeHint = `{"observations":[{"type":"bugfix","title":"...","what":"...","why":"...","where":"...","learned":"...","topic_key":"","updates":null}]}`
 const shapeHintSummary = `{"observations":[...],"summary":{"goal":"...","discoveries":["..."],"accomplished":["..."],"next_steps":["..."],"files":["..."]}}`
 
 func system(lang string, withSummary bool) string {
@@ -135,6 +136,7 @@ type record struct {
 	Where    string `json:"where"`
 	Learned  string `json:"learned"`
 	TopicKey string `json:"topic_key"`
+	Updates  int64  `json:"updates"` // id of an earlier auto-captured record this one replaces
 }
 
 type summary struct {
@@ -189,6 +191,9 @@ func parse(text string, wantSummary bool) (result, int, error) {
 			rec.TopicKey = ""
 		}
 		keys[rec.TopicKey] = rec.TopicKey != ""
+		if rec.Updates < 0 {
+			rec.Updates = 0
+		}
 		kept = append(kept, rec)
 	}
 	r.Observations = kept

@@ -209,8 +209,29 @@ exact repeats).
 Per hour that is still ~70 useful claude-mem records against ~37 engram ones,
 buried under three junk records each and at ~500× the input tokens. Whether
 engram misses facts that matter is what the recall set (milestone 2's eval
-harness, still to build) has to answer; cross-chunk duplicates are the next
-compressor fix.
+harness, still to build) has to answer.
+
+### Cross-chunk continuations (2026-10-08)
+
+Three of the four duplicate pairs shared almost no words ("Proxy disk window
+keeps chunks older than head-3" one chunk, "Stale demand re-fetched evicted
+chunk" — its cause — the next), so title matching cannot catch them. The
+model now sees each already-recorded record of the session as `#id [type]
+title — start of what it says`, and a record that continues one of them —
+the same bug, measurement, decision or component, now with a cause, a fix or
+a better number — carries `updates: <id>` and is written as the complete
+merged record over that one (`UpdateObservation`, so the old text stays in the
+version history). Only records auto-capture wrote in the session qualify; the
+agent's own saves and imported history are never overwritten, and an unknown
+id falls back to a new record. On the audit case all four backends set
+`updates` and wrote one merged record; on an unrelated change in the same
+session (deepseek, glm) they did not.
+
+The same day: the compressor used to look for the session summary and the
+"already recorded" list among the session's 200 *oldest* rows, which in a
+session with imported claude-mem history are months old — the summary was
+never found and restarted every turn. It now reads the session most recently
+updated first (`RecentSessionObservations`).
 
 ## Milestone 2 results (2026-10-07, real sessions, deepseek-v4.1-flash)
 

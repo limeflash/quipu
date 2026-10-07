@@ -23,6 +23,7 @@ var t0 = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
 type fakeSink struct {
 	obs      []store.AddObservationParams
+	updates  map[int64]store.UpdateObservationParams
 	sessions map[string]string
 	existing []store.Observation
 	failAdd  bool
@@ -53,6 +54,13 @@ func (f *fakeSink) AddObservation(p store.AddObservationParams) (int64, error) {
 }
 func (f *fakeSink) RecentSessionObservations(string, int) ([]store.Observation, error) {
 	return f.existing, nil
+}
+func (f *fakeSink) UpdateObservation(id int64, p store.UpdateObservationParams) (*store.Observation, error) {
+	if f.updates == nil {
+		f.updates = map[int64]store.UpdateObservationParams{}
+	}
+	f.updates[id] = p
+	return &store.Observation{ID: id}, nil
 }
 
 // fakeGen records what it was asked and replays canned results.
@@ -602,7 +610,7 @@ func TestExistingFindsSummaryPastImportedHistory(t *testing.T) {
 		obs = append(obs, store.Observation{Type: "discovery", Title: fmt.Sprintf("imported %d", i)})
 	}
 	d := &drainer{sink: &fakeSink{existing: obs}}
-	recorded, prev, titles := d.existing("s")
+	recorded, prev, titles, _ := d.existing("s")
 	if prev != "## Goal\nlatest" {
 		t.Fatalf("summary not found: %q", prev)
 	}
@@ -611,5 +619,51 @@ func TestExistingFindsSummaryPastImportedHistory(t *testing.T) {
 	}
 	if !titles["newest record"] || titles["session summary: imported turn"] {
 		t.Fatalf("titles %v", len(titles))
+	}
+}
+
+// The audit case: one chunk records a failing self-check, the next finds the
+// cause. The second must rewrite the first, not stand beside it.
+func TestContinuationRewritesEarlierRecord(t *testing.T) {
+	dir := t.TempDir()
+	spoolEvents(t, dir,
+		ev(autocapture.KindEvent, "Edit", t0, "clear demand index when satisfied from disk"),
+		autocapture.Event{V: 1, Kind: autocapture.KindTurnEnd, SessionID: "s1", CWD: `C:\repo`, Output: "Fixed.", At: t0.Add(time.Second)},
+	)
+	auto := ToolName
+	sink := &fakeSink{existing: []store.Observation{
+		{ID: 7, Type: "bugfix", Title: "Evict self-check keeps chunks older than head-3", ToolName: &auto,
+			Content: "**What**: disk held chunk 5 far behind the read head\n**Why**: unknown"},
+		{ID: 8, Type: "decision", Title: "Agent saved this itself"},
+	}}
+	gen := &fakeGen{reply: func(int, string, bool) (result, error) {
+		return result{Observations: []record{
+			{Type: "bugfix", Title: "Stale demand re-fetched evicted chunk", What: "chunk 5 came back because the demand index stayed set", Updates: 7},
+			{Type: "decision", Title: "Rewrite of the agent's record", What: "must not land on #8", Updates: 8},
+			{Type: "feature", Title: "Unknown target", What: "no #99 in this session", Updates: 99},
+		}, Summary: &summary{Goal: "g", Accomplished: []string{"a"}}}, nil
+	}}
+	rep, err := Drain(context.Background(), sink, gen, testConfig(), dir, t0.Add(time.Minute), false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gen.users[0], "#7 [bugfix] Evict self-check keeps chunks older than head-3 — disk held chunk 5 far behind the read head") {
+		t.Fatalf("the model must see the record's id and gist:\n%s", gen.users[0])
+	}
+	u, ok := sink.updates[7]
+	if rep.Updated != 1 || !ok || *u.Title != "Stale demand re-fetched evicted chunk" || !strings.Contains(*u.Content, "demand index stayed set") {
+		t.Fatalf("record 7 not rewritten: report %+v, updates %v", rep, sink.updates)
+	}
+	if _, touched := sink.updates[8]; touched {
+		t.Fatal("an agent-written record was overwritten")
+	}
+	var added []string
+	for _, o := range sink.obs {
+		if o.Type != "session_summary" {
+			added = append(added, o.Title)
+		}
+	}
+	if strings.Join(added, "|") != "Rewrite of the agent's record|Unknown target" || rep.Observations != 2 {
+		t.Fatalf("records with an unusable target must be added as new: %v", added)
 	}
 }

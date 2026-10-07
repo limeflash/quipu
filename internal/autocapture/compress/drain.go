@@ -25,6 +25,7 @@ type Sink interface {
 	DetectProject(directory string) project.DetectionResult
 	CreateSession(id, project, directory string) error
 	AddObservation(p store.AddObservationParams) (int64, error)
+	UpdateObservation(id int64, p store.UpdateObservationParams) (*store.Observation, error)
 	RecentSessionObservations(sessionID string, limit int) ([]store.Observation, error)
 }
 
@@ -48,6 +49,7 @@ type Report struct {
 	Sessions     int
 	Calls        int
 	Observations int
+	Updated      int // earlier records of the session rewritten instead of repeated
 	Summaries    int
 	Deferred     int // sessions not ready yet
 	Failed       int // sessions put back for a later retry
@@ -347,7 +349,7 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 	}
 	sort.SliceStable(order, func(i, j int) bool { return order[j] == summaryProj && order[i] != summaryProj })
 
-	recorded, prevSummary, titles := d.existing(sessionID)
+	recorded, prevSummary, titles, own := d.existing(sessionID)
 	for _, proj := range order {
 		if !d.dryRun {
 			if err := d.sink.CreateSession(sessionID, proj, cwd); err != nil {
@@ -380,21 +382,40 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 				return err
 			}
 			for _, r := range res.Observations {
+				// A later chunk often finishes what an earlier one started —
+				// the cause of a bug, a better measurement. The model then
+				// names the record it continues, and that record is rewritten
+				// (its old text stays in the version history). Only records
+				// auto-capture wrote in this session qualify: the agent's own
+				// saves and imported history are never overwritten.
+				if r.Updates != 0 && own[r.Updates] {
+					if err := d.update(r.Updates, r); err != nil {
+						return err
+					}
+					rep.Updated++
+					titles[strings.ToLower(r.Title)] = true
+					recorded = append(recorded, recordedLine(r.Updates, r.Type, r.Title, r.TopicKey, r.What))
+					continue
+				}
 				// The model is told what is recorded but still restates it
 				// now and then; an identical title is never a new memory.
 				if titles[strings.ToLower(r.Title)] {
 					continue
 				}
 				titles[strings.ToLower(r.Title)] = true
-				if err := d.write(store.AddObservationParams{SessionID: sessionID, Type: r.Type, Title: r.Title,
-					Content: r.content(), ToolName: ToolName, Project: proj, Scope: "project", TopicKey: r.TopicKey}); err != nil {
+				id, err := d.write(store.AddObservationParams{SessionID: sessionID, Type: r.Type, Title: r.Title,
+					Content: r.content(), ToolName: ToolName, Project: proj, Scope: "project", TopicKey: r.TopicKey})
+				if err != nil {
 					return err
 				}
 				rep.Observations++
-				recorded = append(recorded, recordedLine(r.Type, r.Title, r.TopicKey))
+				if id > 0 {
+					own[id] = true
+				}
+				recorded = append(recorded, recordedLine(id, r.Type, r.Title, r.TopicKey, r.What))
 			}
 			if res.Summary != nil {
-				if err := d.write(store.AddObservationParams{SessionID: sessionID, Type: "session_summary",
+				if _, err := d.write(store.AddObservationParams{SessionID: sessionID, Type: "session_summary",
 					Title: "Session summary: " + proj, Content: res.Summary.content(d.now), ToolName: ToolName,
 					Project: proj, Scope: "project", TopicKey: "session/" + safeName(sessionID)}); err != nil {
 					return err
@@ -456,34 +477,58 @@ func eventDirs(ev autocapture.Event) []string {
 	return dirs
 }
 
-func recordedLine(typ, title, key string) string {
-	if key != "" {
-		return "[" + typ + "] " + title + " (topic_key " + key + ")"
+// recordedLine is how the model sees a record already in the store: its id,
+// so a continuation can name it, and the start of what it says, so the model
+// can tell the same subject behind different words.
+func recordedLine(id int64, typ, title, key, what string) string {
+	line := "[" + typ + "] " + title
+	if id > 0 {
+		line = fmt.Sprintf("#%d %s", id, line)
 	}
-	return "[" + typ + "] " + title
+	if key != "" {
+		line += " (topic_key " + key + ")"
+	}
+	if what = strings.Join(strings.Fields(strings.TrimPrefix(what, "**What**: ")), " "); what != "" {
+		if r := []rune(what); len(r) > 110 {
+			what = string(r[:110]) + "…"
+		}
+		line += " — " + what
+	}
+	return line
 }
 
-func (d *drainer) write(p store.AddObservationParams) error {
+func (d *drainer) write(p store.AddObservationParams) (int64, error) {
 	if d.dryRun {
 		if d.out != nil {
 			d.out(fmt.Sprintf("[%s] %s  (topic %q)\n%s\n", p.Type, p.Title, p.TopicKey, p.Content))
 		}
+		return 0, nil
+	}
+	return d.sink.AddObservation(p)
+}
+
+func (d *drainer) update(id int64, r record) error {
+	content := r.content()
+	if d.dryRun {
+		if d.out != nil {
+			d.out(fmt.Sprintf("[%s] %s  (updates #%d)\n%s\n", r.Type, r.Title, id, content))
+		}
 		return nil
 	}
-	_, err := d.sink.AddObservation(p)
+	_, err := d.sink.UpdateObservation(id, store.UpdateObservationParams{Type: &r.Type, Title: &r.Title, Content: &content})
 	return err
 }
 
 // existing lists what the session already holds — the agent's own mem_save
 // records included — so the model does not restate it.
-func (d *drainer) existing(sessionID string) (recorded []string, prevSummary string, titles map[string]bool) {
-	titles = map[string]bool{}
+func (d *drainer) existing(sessionID string) (recorded []string, prevSummary string, titles map[string]bool, own map[int64]bool) {
+	titles, own = map[string]bool{}, map[int64]bool{}
 	// Most recently updated first, so the summary — upserted every turn — and
 	// the latest records are found even when the session's oldest rows are
 	// hundreds of imported or long-finished ones.
 	obs, err := d.sink.RecentSessionObservations(sessionID, 200)
 	if err != nil {
-		return nil, "", titles
+		return nil, "", titles, own
 	}
 	key := "session/" + safeName(sessionID)
 	for _, o := range obs {
@@ -502,11 +547,14 @@ func (d *drainer) existing(sessionID string) (recorded []string, prevSummary str
 			if o.TopicKey != nil {
 				k = *o.TopicKey
 			}
-			recorded = append(recorded, recordedLine(o.Type, o.Title, k))
+			recorded = append(recorded, recordedLine(o.ID, o.Type, o.Title, k, o.Content))
+			if o.ToolName != nil && *o.ToolName == ToolName {
+				own[o.ID] = true
+			}
 		}
 	}
 	slices.Reverse(recorded) // the prompt lists them oldest first
-	return recorded, prevSummary, titles
+	return recorded, prevSummary, titles, own
 }
 
 func chunkEvents(events []spooled, maxChars int) [][]spooled {
