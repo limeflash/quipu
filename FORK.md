@@ -117,6 +117,14 @@ They stay in the tree for clean rebases; nothing here depends on them.
    token from `claude setup-token` in `~/.engram/claude.token`, 20 calls/hour.
    A bad credential disables only its own provider. `engram autocapture probe`
    checks every backend.
+
+   Chain order: Ollama models → **Codex** (`codex exec -m gpt-6-luna -c
+   model_reasoning_effort=max --ignore-user-config --disable hooks --ephemeral
+   -s read-only --json --output-schema … -o …`, the user's ChatGPT plan, 20
+   calls/hour, native `codex.exe` behind the npm shim, strict-mode schema with
+   a nullable summary) → **Claude** as the last resort. Probe on 2026-10-07:
+   deepseek 0.9 s / 639 in, glm 6.8 s / 628 in, Codex 10.3 s / 16.8k in,
+   Sonnet 8.8 s / 8k in.
 4. ✅ Codex capture. Codex hooks are Claude-compatible (its engine is literally
    `ClaudeHooksEngine`): exec arrives as `Bash` with `tool_input.command`
    and a string `tool_response`; edits as `apply_patch` with the patch text in

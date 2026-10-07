@@ -20,9 +20,19 @@ type Config struct {
 		Models []string `json:"models"` // tried in order
 		Think  []string `json:"think"`  // model-name prefixes that must run with thinking on
 	} `json:"ollama"`
-	// Claude is the fallback when every Ollama model is out of quota. It is on
-	// whenever a token from `claude setup-token` is available, unless
-	// "enabled": false.
+	// Codex is the first fallback when every Ollama model is out of quota,
+	// spending the user's ChatGPT plan. It is on whenever Codex is installed
+	// and logged in, unless "enabled": false.
+	Codex struct {
+		Enabled         *bool  `json:"enabled"`
+		Model           string `json:"model"`
+		Effort          string `json:"effort"`
+		MaxCallsPerHour int    `json:"max_calls_per_hour"`
+		Exe             string `json:"exe"`
+		TimeoutSecs     int    `json:"timeout_secs"`
+	} `json:"codex"`
+	// Claude is the last resort, after Codex. It is on whenever a token from
+	// `claude setup-token` is available, unless "enabled": false.
 	Claude struct {
 		Enabled         *bool  `json:"enabled"`
 		Model           string `json:"model"`
@@ -59,6 +69,19 @@ func Load(dataDir string) (Config, error) {
 	if c.Ollama.Think == nil {
 		c.Ollama.Think = []string{"glm-"}
 	}
+	if c.Codex.Model == "" {
+		c.Codex.Model = "gpt-6-luna"
+	}
+	if c.Codex.Effort == "" {
+		c.Codex.Effort = "max"
+	}
+	if c.Codex.MaxCallsPerHour <= 0 {
+		c.Codex.MaxCallsPerHour = 20
+	}
+	if c.Codex.TimeoutSecs <= 0 {
+		c.Codex.TimeoutSecs = 300
+	}
+	c.Codex.Exe = codexExe(c.Codex.Exe)
 	if c.Claude.Model == "" {
 		c.Claude.Model = "claude-sonnet-5-5"
 	}

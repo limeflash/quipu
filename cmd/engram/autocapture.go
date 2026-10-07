@@ -71,6 +71,9 @@ func autocaptureContext(cfg store.Config) {
 		CWD       string `json:"cwd"`
 		Source    string `json:"source"`
 	}
+	if os.Getenv("ENGRAM_INTERNAL") == "1" { // a fallback model's own session
+		return
+	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	if err != nil || json.Unmarshal(data, &in) != nil || in.SessionID == "" {
 		return
