@@ -1281,12 +1281,14 @@ func handleSearch(s *store.Store, cfg MCPConfig, activity *SessionActivity) serv
 		sessionID := defaultSessionID(project)
 		activity.RecordToolCall(sessionID)
 
-		results, err := s.SearchPreviewsContext(ctx, query, store.SearchOptions{
+		results, err := store.AllThenAny(store.SearchOptions{
 			Type:      typ,
 			Project:   searchProject,
 			Scope:     scope,
 			Limit:     limit,
 			MatchMode: matchMode,
+		}, func(o store.SearchOptions) ([]store.SearchPreviewResult, error) {
+			return s.SearchPreviewsContext(ctx, query, o)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Search error: %s. Try simpler keywords.", err)), nil

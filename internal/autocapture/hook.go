@@ -31,7 +31,7 @@ func RunHook(agent string, stdin io.Reader, stderr io.Writer) {
 		return
 	}
 	ev, ok := FromClaude(raw, time.Now())
-	if !ok {
+	if !ok || inside(ev.Target, dataDir) {
 		return
 	}
 	if agent != "" {
@@ -61,4 +61,15 @@ func DataDir() (string, bool) {
 		return filepath.Join(filepath.Dir(filepath.Dir(v)), ".engram"), true
 	}
 	return "", false
+}
+
+// inside reports a target within dir. Memory's own files — spool, logs, eval
+// sets — are not work to remember: a recall test's answer key written there
+// once came back as memories that answered the test.
+func inside(target, dir string) bool {
+	if target == "" || dir == "" {
+		return false
+	}
+	t, d := filepath.Clean(target), filepath.Clean(dir)
+	return len(t) > len(d) && strings.EqualFold(t[:len(d)], d) && os.IsPathSeparator(t[len(d)])
 }

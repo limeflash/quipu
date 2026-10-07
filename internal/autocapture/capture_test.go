@@ -1,7 +1,9 @@
 package autocapture
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,5 +244,24 @@ func TestWriteSpool(t *testing.T) {
 		if json.Unmarshal(data, &back) != nil || back.Target != "a.go" || back.V != 1 {
 			t.Fatalf("bad spool file: %s", data)
 		}
+	}
+}
+
+func TestHookSkipsMemorysOwnFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ENGRAM_DATA_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path string) {
+		raw, _ := json.Marshal(map[string]any{"hook_event_name": "PostToolUse", "session_id": "s", "cwd": dir,
+			"tool_name": "Write", "tool_input": map[string]any{"file_path": path, "content": "answer key"}})
+		RunHook("claude", bytes.NewReader(raw), io.Discard)
+	}
+	write(filepath.Join(strings.ToUpper(dir), "eval", "questions.json")) // case differs on Windows
+	write(dir + "-sibling" + string(filepath.Separator) + "notes.md")    // a prefix is not containment
+	entries, _ := os.ReadDir(SpoolDir(dir))
+	if len(entries) != 1 {
+		t.Fatalf("want only the sibling write spooled, got %d events", len(entries))
 	}
 }

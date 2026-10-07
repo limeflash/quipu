@@ -1366,7 +1366,7 @@ func cmdSearch(cfg store.Config) {
 	}
 	opts.Project = resolved
 
-	results, err := storeSearch(s, query, opts)
+	results, err := store.AllThenAny(opts, func(o store.SearchOptions) ([]store.SearchResult, error) { return storeSearch(s, query, o) })
 	if err != nil {
 		fatal(err)
 		return
