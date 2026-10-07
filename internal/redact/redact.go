@@ -47,12 +47,23 @@ var notSecret = map[string]bool{
 	"отсутствует": true,
 }
 
+// inProse reports a plain word followed by more words on the same line:
+// "Password: encrypted by the store", "secrets: password_hash, totp_seed".
+// A config value ends its line, so .env and YAML keep being redacted.
+// ponytail: an unquoted all-letter password inside a sentence ("password is
+// swordfish and ...") now passes; quoted or with a digit it does not.
+func inProse(value, after string) bool {
+	return plainWordRe.MatchString(value) && proseNextRe.MatchString(after)
+}
+
 func looksSecret(value string) bool {
 	v := strings.ToLower(value)
 	if notSecret[v] || strings.ContainsRune(v, 0) {
 		return false
 	}
-	return !strings.HasPrefix(v, "[secret") && !strings.HasPrefix(v, "[redacted") && !strings.HasPrefix(v, "******")
+	// "--surface-bg": a CSS custom property or a CLI flag, never a value.
+	return !strings.HasPrefix(v, "[secret") && !strings.HasPrefix(v, "[redacted") && !strings.HasPrefix(v, "******") &&
+		!strings.HasPrefix(v, "--")
 }
 
 // Key names whose value is a secret regardless of shape. Deliberately narrow.
@@ -63,9 +74,10 @@ const quotes = "\"'`"
 type rule struct {
 	id string
 	re *regexp.Regexp
-	// replace returns the replacement for one match; g[0] is the whole match.
-	// Returning g[0] means "not a secret, leave it". nil replaces with the mark.
-	replace func(mark string, g []string) string
+	// replace returns the replacement for one match; g[0] is the whole match
+	// and after is the text that follows it. Returning g[0] means "not a
+	// secret, leave it". nil replaces with the mark.
+	replace func(mark string, g []string, after string) string
 }
 
 var rules = []rule{
@@ -75,7 +87,7 @@ var rules = []rule{
 	{
 		id: "password-prose",
 		re: regexp.MustCompile(`(?i)(?:^|[^\p{L}\d_])(пароль|пасс|password|passphrase|мнемоника)(\s*(?:is|—|–|-|:|=)+\s*|\s+)([` + quotes + `]?)([^\s` + quotes + `,;]{6,})([` + quotes + `]?)`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			word, sep, open, value, closing := g[1], g[2], g[3], g[4], g[5]
 			if strings.TrimSpace(sep) == "" && open == "" {
 				return g[0]
@@ -83,7 +95,7 @@ var rules = []rule{
 			if open != "" && closing != open {
 				return g[0]
 			}
-			if !looksSecret(value) {
+			if !looksSecret(value) || open == "" && inProse(value, after) {
 				return g[0]
 			}
 			lead := g[0][:strings.Index(g[0], word)]
@@ -114,7 +126,7 @@ var rules = []rule{
 	{
 		id: "url-credentials",
 		re: regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)([^\s:/@]{0,64}):([^\s:/@]{1,256})@`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			return g[1] + g[2] + ":" + mark + "@"
 		},
 	},
@@ -124,7 +136,7 @@ var rules = []rule{
 	{
 		id: "cli-password",
 		re: regexp.MustCompile(`(--password[=\s]|--passwd[=\s]|--pass[=\s]|-p)(["'])([^"'\n]{4,})(["'])`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			if g[2] != g[4] || !looksSecret(g[3]) {
 				return g[0]
 			}
@@ -135,7 +147,7 @@ var rules = []rule{
 	{
 		id: "cli-password",
 		re: regexp.MustCompile(`(--password=|--passwd=|--pass=)([^\s"'\n]{6,})`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			if !looksSecret(g[2]) {
 				return g[0]
 			}
@@ -145,8 +157,8 @@ var rules = []rule{
 	// curl -u user:pass / --user user:pass
 	{
 		id: "cli-basic-auth",
-		re: regexp.MustCompile(`(\s(?:-u|--user)\s+)([^\s:'"]{1,64}):([^\s'"]{4,})`),
-		replace: func(mark string, g []string) string {
+		re: regexp.MustCompile(`(\s(?:-u|--user)\s+)([A-Za-z0-9_.@-]{1,64}):([^\s'"]{4,})`),
+		replace: func(mark string, g []string, after string) string {
 			if !looksSecret(g[3]) {
 				return g[0]
 			}
@@ -157,7 +169,7 @@ var rules = []rule{
 	{
 		id: "xml-secret",
 		re: regexp.MustCompile(`(?i)<(password|passwd|secret|token|apikey|api-key|credential)>([^<\n]{4,})</(password|passwd|secret|token|apikey|api-key|credential)>`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			if !strings.EqualFold(g[1], g[3]) || !looksSecret(g[2]) {
 				return g[0]
 			}
@@ -168,19 +180,19 @@ var rules = []rule{
 	{
 		id:      "auth-header",
 		re:      regexp.MustCompile(`(?i)\b(Authorization\s*:\s*(?:Bearer|Basic|Token)\s+)([A-Za-z0-9+/=._~-]{12,})`),
-		replace: func(mark string, g []string) string { return g[1] + mark },
+		replace: func(mark string, g []string, _ string) string { return g[1] + mark },
 	},
 
 	// Generic KEY = VALUE: .env lines, JSON settings, shell exports, YAML.
 	{
 		id: "assigned-secret",
 		re: regexp.MustCompile(`(?i)([A-Za-z0-9_.-]*` + secretKey + `[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)(["']?)([^\s"',;}\])]{8,})(["']?)`),
-		replace: func(mark string, g []string) string {
+		replace: func(mark string, g []string, after string) string {
 			key, sep, open, value, closing := g[1], g[2], g[3], g[4], g[5]
 			if open != "" && closing != open {
 				return g[0]
 			}
-			if !looksSecret(value) {
+			if !looksSecret(value) || open == "" && inProse(value, after) {
 				return g[0]
 			}
 			// A path or URL under a "token"-ish name is usually a location.
@@ -198,6 +210,9 @@ var rules = []rule{
 
 var (
 	locationRe    = regexp.MustCompile(`^(?:https?://|\.{0,2}/)`)
+	plainWordRe   = regexp.MustCompile(`^\p{L}+(?:[-_.']\p{L}+)*[.:!?]?$`)
+	proseNextRe   = regexp.MustCompile(`^[,;)]?[ \t]+[\p{L}(]`)
+	existingRe    = regexp.MustCompile(`\[(?:SECRET|REDACTED)(?::[A-Za-z0-9_-]+)?\]`)
 	secretQueryRe = regexp.MustCompile(`(?i)[?&](?:token|key|secret)=`)
 	thawRe        = regexp.MustCompile("\x00(\\d+)\x00")
 	wordRe        = regexp.MustCompile(`[A-Za-z]+`)
@@ -205,7 +220,7 @@ var (
 )
 
 // replaceAll is ReplaceAllStringFunc with access to submatches.
-func replaceAll(re *regexp.Regexp, s string, f func(g []string) string) (string, int) {
+func replaceAll(re *regexp.Regexp, s string, f func(g []string, after string) string) (string, int) {
 	idx := re.FindAllStringSubmatchIndex(s, -1)
 	if idx == nil {
 		return s, 0
@@ -219,7 +234,7 @@ func replaceAll(re *regexp.Regexp, s string, f func(g []string) string) (string,
 				g[i] = s[m[2*i]:m[2*i+1]]
 			}
 		}
-		r := f(g)
+		r := f(g, s[m[1]:min(len(s), m[1]+16)])
 		if r != g[0] {
 			n++
 		}
@@ -283,7 +298,9 @@ func Text(text string) (string, map[string]int) {
 		return "\x00" + strconv.Itoa(len(frozen)-1) + "\x00"
 	}
 
-	out, n := redactSeedPhrases(text, freeze(placeholder("seed-phrase")))
+	// Text redacted earlier (claude-mem, an agent) keeps its placeholders.
+	out := existingRe.ReplaceAllStringFunc(text, freeze)
+	out, n := redactSeedPhrases(out, freeze(placeholder("seed-phrase")))
 	if n > 0 {
 		hits["seed-phrase"] = n
 	}
@@ -291,11 +308,11 @@ func Text(text string) (string, map[string]int) {
 		mark := freeze(placeholder(r.id))
 		replace := r.replace
 		var count int
-		out, count = replaceAll(r.re, out, func(g []string) string {
+		out, count = replaceAll(r.re, out, func(g []string, after string) string {
 			if replace == nil {
 				return mark
 			}
-			return replace(mark, g)
+			return replace(mark, g, after)
 		})
 		if count > 0 {
 			hits[r.id] += count
