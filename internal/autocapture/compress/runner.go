@@ -109,6 +109,30 @@ func Probe(ctx context.Context, dataDir string) ([]ProbeResult, error) {
 	return out, nil
 }
 
+// BuildProfile rebuilds, right now, the profile of the repository dir is in.
+func BuildProfile(ctx context.Context, sink Sink, dataDir, dir string) (string, error) {
+	cfg, err := Load(dataDir)
+	if err != nil {
+		return "", err
+	}
+	gen, err := NewGenerator(cfg, dataDir)
+	if err != nil {
+		return "", err
+	}
+	d := &drainer{sink: sink, gen: gen, cfg: cfg, dataDir: dataDir, now: time.Now(),
+		projs: map[string]string{}, roots: map[string]string{}}
+	p := d.project(dir, true)
+	if p == "" || d.roots[p] == "" {
+		return "", fmt.Errorf("%s is not inside a repository", dir)
+	}
+	profiles := loadProfiles(dataDir)
+	content, err := d.refreshProfile(ctx, p, d.roots[p], profiles, true)
+	if err == nil {
+		saveProfiles(dataDir, profiles)
+	}
+	return content, err
+}
+
 // RunOnce drains the spool once under the cross-process lock. ok is false
 // when another process holds the lock.
 func RunOnce(ctx context.Context, sink Sink, dataDir string, dryRun bool, out func(string)) (rep Report, ok bool, err error) {

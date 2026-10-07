@@ -44,6 +44,21 @@ func cmdAutocapture(cfg store.Config) {
 		autocaptureStatus(cfg.DataDir)
 	case "context":
 		autocaptureContext(cfg)
+	case "profile":
+		dir, _ := os.Getwd()
+		if len(os.Args) > 3 {
+			dir = os.Args[3]
+		}
+		s, err := storeNew(cfg)
+		if err != nil {
+			fatal(err)
+		}
+		defer s.Close()
+		content, err := compress.BuildProfile(context.Background(), s, cfg.DataDir, dir)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(content)
 	case "probe":
 		results, err := compress.Probe(context.Background(), cfg.DataDir)
 		if err != nil {
@@ -57,7 +72,7 @@ func cmdAutocapture(cfg store.Config) {
 			fmt.Printf("%-4s %-28s %6.1fs  in %6d / out %5d  %s\n", status, r.Backend, r.Took.Seconds(), r.Usage.In, r.Usage.Out, r.Detail)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context | probe")
+		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context | probe | profile [dir]")
 		exitFunc(1)
 	}
 }
@@ -83,7 +98,7 @@ func autocaptureContext(cfg store.Config) {
 		return
 	}
 	defer s.Close()
-	block := compress.SessionContext(s, in.SessionID, in.CWD, in.Source, time.Now().UTC())
+	block := compress.SessionContext(s, cfg.DataDir, in.SessionID, in.CWD, in.Source, time.Now().UTC())
 	if block == "" {
 		return
 	}
