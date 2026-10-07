@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Gentleman-Programming/engram/v3/internal/autocapture/compress"
 	"github.com/Gentleman-Programming/engram/v3/internal/cloud/autosync"
 	"github.com/Gentleman-Programming/engram/v3/internal/cloud/constants"
 	"github.com/Gentleman-Programming/engram/v3/internal/cloud/remote"
@@ -821,6 +822,8 @@ func main() {
 		cmdSetup(cfg)
 	case "protocol-mode":
 		cmdProtocolMode(cfg)
+	case "autocapture": // fork: see FORK.md
+		cmdAutocapture(cfg)
 	case "version", "--version", "-v":
 		fmt.Printf("engram %s\n", version)
 	case "help", "--help", "-h":
@@ -1139,6 +1142,9 @@ func cmdMCP(cfg store.Config) {
 	// startup fatal when cloud config is missing or invalid.
 	ctx, cancel := context.WithCancel(context.Background())
 	_, mgrStop := tryStartAutosync(ctx, s, cfg)
+	// Fork: compress the auto-capture spool while this session lives (FORK.md).
+	stopCompress := compress.Start(ctx, s, cfg.DataDir)
+	defer stopCompress()
 	// stopAutosync is invoked concurrently: cmdMCP's deferred call runs on the
 	// main goroutine while the stdio EOF unwind hook may call it from the
 	// MCP reader goroutine. sync.Once provides the required synchronization.

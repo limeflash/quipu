@@ -144,6 +144,36 @@ func TestToolSelection(t *testing.T) {
 	}
 }
 
+func TestPromptAndTurnEnd(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"session_id": "s1", "cwd": "C:\\repo", "hook_event_name": "UserPromptSubmit",
+		"prompt": "fix the login bug <private>my password is hunter2hunter</private>"})
+	ev := mustCapture(t, raw)
+	if ev.Kind != KindPrompt || strings.Contains(ev.Input, "hunter2") || !strings.Contains(ev.Input, "fix the login bug") {
+		t.Fatalf("got %+v", ev)
+	}
+
+	transcript := t.TempDir() + string(os.PathSeparator) + "t.jsonl"
+	lines := []string{
+		`{"type":"user","message":{"content":"hi"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"first answer"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Fixed the login bug in auth.go."},{"type":"tool_use","name":"Edit"}]}}`,
+		`{"type":"system","subtype":"stop"}`,
+	}
+	if err := os.WriteFile(transcript, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(map[string]any{"session_id": "s1", "cwd": "C:\\repo", "hook_event_name": "Stop", "transcript_path": transcript})
+	ev = mustCapture(t, raw)
+	if ev.Kind != KindTurnEnd || ev.Output != "Fixed the login bug in auth.go." {
+		t.Fatalf("got %+v", ev)
+	}
+
+	raw, _ = json.Marshal(map[string]any{"session_id": "s1", "hook_event_name": "Stop", "last_assistant_message": "done"})
+	if ev = mustCapture(t, raw); ev.Output != "done" {
+		t.Fatalf("last_assistant_message should win, got %q", ev.Output)
+	}
+}
+
 func TestReadOnlyCommand(t *testing.T) {
 	read := []string{
 		"ls -la", "cat a.go | grep foo", "git status", "git log --oneline -5", "git diff HEAD~1",
