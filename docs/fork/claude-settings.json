@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(Edit|MultiEdit|Write|NotebookEdit|Bash|PowerShell|Read|NotebookRead|Grep|Glob|LS|WebFetch|WebSearch|mcp__.+)$",
+        "hooks": [
+          { "type": "command", "command": "\"$USERPROFILE/AppData/Local/Programs/engram/engram-capture.exe\"", "timeout": 5, "async": true }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$USERPROFILE/AppData/Local/Programs/engram/engram-capture.exe\"", "timeout": 5, "async": true }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$USERPROFILE/AppData/Local/Programs/engram/engram-capture.exe\"", "timeout": 5, "async": true }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$USERPROFILE/AppData/Local/Programs/engram/engram.exe\" autocapture context", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

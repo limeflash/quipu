@@ -257,24 +257,33 @@ func TestEventsAttributedToTheirRepository(t *testing.T) {
 	}
 }
 
-func TestEventDir(t *testing.T) {
-	abs := `C:\work\repoB`
+func TestEventDirs(t *testing.T) {
+	abs, cwd := `C:\work\repoB`, `C:\work\repoA`
 	if filepath.Separator == '/' {
-		abs = "/work/repoB"
+		abs, cwd = "/work/repoB", "/work/repoA"
 	}
+	sh := func(cmd string) autocapture.Event { return autocapture.Event{Tool: "PowerShell", Input: cmd, CWD: cwd} }
 	for _, c := range []struct {
 		ev   autocapture.Event
-		want string
+		want string // first candidate
 	}{
-		{autocapture.Event{Target: filepath.Join(abs, "a.go")}, abs},
-		{autocapture.Event{Target: "rel/a.go"}, ""},
-		{autocapture.Event{Input: "cd " + abs + "; go test ./..."}, abs},
-		{autocapture.Event{Input: `Set-Location "` + abs + `" && make`}, abs},
-		{autocapture.Event{Input: "cd sub && make"}, ""},
-		{autocapture.Event{Input: "go test ./..."}, ""},
+		{autocapture.Event{Target: filepath.Join(abs, "a.go"), CWD: cwd}, abs},
+		{autocapture.Event{Tool: "Edit", Target: "rel/a.go", CWD: cwd}, cwd},
+		{sh("cd " + abs + "; go test ./..."), abs},
+		{sh(`Set-Location "` + abs + `" && make`), abs},
+		// the rwsimgpro case: the directory change is not the first statement
+		{sh(`$env:PATH="C:\tools;$env:PATH"; Set-Location ` + abs + `; pnpm test`), abs},
+		{sh("git -C " + abs + " status"), abs},
+		{sh("go vet " + filepath.Join(abs, "cmd", "x")), filepath.Join(abs, "cmd")},
+		{sh("cd sub && make"), cwd},
+		{sh("go test ./..."), cwd},
 	} {
-		if got := eventDir(c.ev); got != c.want {
-			t.Errorf("%+v: got %q want %q", c.ev, got, c.want)
+		got := eventDirs(c.ev)
+		if len(got) == 0 || got[0] != c.want {
+			t.Errorf("%q: got %q want first %q", c.ev.Input+c.ev.Target, got, c.want)
+		}
+		if got[len(got)-1] != cwd {
+			t.Errorf("%q: the shell's own cwd must stay the last resort, got %q", c.ev.Input, got)
 		}
 	}
 }

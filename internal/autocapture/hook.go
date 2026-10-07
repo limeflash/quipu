@@ -13,10 +13,11 @@ import (
 // an agent waiting on memory is not. Callers enforce it with os.Exit.
 const HookDeadline = 2 * time.Second
 
-// RunClaudeHook is the Claude Code PostToolUse hook: read one payload, spool
-// it, return. It opens no store, makes no network call and never writes to
-// stdout, because it runs on every tool call of every session.
-func RunClaudeHook(stdin io.Reader, stderr io.Writer) {
+// RunHook is the capture hook for Claude Code and Codex — their hook payloads
+// share one shape: read one payload, spool it, return. It opens no store,
+// makes no network call and never writes to stdout, because it runs on every
+// tool call of every session. agent labels the events ("claude", "codex").
+func RunHook(agent string, stdin io.Reader, stderr io.Writer) {
 	// Our own fallback `claude -p` runs must not capture themselves.
 	if os.Getenv("ENGRAM_INTERNAL") == "1" {
 		return
@@ -32,6 +33,9 @@ func RunClaudeHook(stdin io.Reader, stderr io.Writer) {
 	ev, ok := FromClaude(raw, time.Now())
 	if !ok {
 		return
+	}
+	if agent != "" {
+		ev.Agent = agent
 	}
 	if err := Write(SpoolDir(dataDir), ev); err != nil {
 		fmt.Fprintln(stderr, "engram: auto-capture:", err)

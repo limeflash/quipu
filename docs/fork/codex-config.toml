@@ -1,0 +1,41 @@
+# >>> engram autocapture >>>
+# Capture hooks and the read-only engram MCP server (limeflash/engram fork).
+# Commands avoid quotes and spaces so they run the same under cmd.exe and
+# PowerShell. Remove this block to switch it off.
+[[hooks.PostToolUse]]
+matcher = "Bash|apply_patch|Edit|Write|mcp__.*"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'C:\Users\<you>\AppData\Local\Programs\engram\engram-capture.exe codex'
+timeout = 5
+async = true
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'C:\Users\<you>\AppData\Local\Programs\engram\engram-capture.exe codex'
+timeout = 5
+async = true
+
+[[hooks.Stop]]
+
+# synchronous: codex exec exits before an async Stop hook finishes
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'C:\Users\<you>\AppData\Local\Programs\engram\engram-capture.exe codex'
+timeout = 5
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'C:\Users\<you>\AppData\Local\Programs\engram\engram.exe autocapture context'
+timeout = 10
+
+[mcp_servers.engram]
+command = 'C:\Users\<you>\AppData\Local\Programs\engram\engram.exe'
+args = ["mcp", "--tools=mem_search,mem_context,mem_get_observation,mem_timeline,mem_current_project,mem_list_projects"]
+# <<< engram autocapture <<<

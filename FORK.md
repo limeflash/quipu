@@ -117,7 +117,22 @@ They stay in the tree for clean rebases; nothing here depends on them.
    token from `claude setup-token` in `~/.engram/claude.token`, 20 calls/hour.
    A bad credential disables only its own provider. `engram autocapture probe`
    checks every backend.
-4. Codex capture
+4. ✅ Codex capture. Codex hooks are Claude-compatible (its engine is literally
+   `ClaudeHooksEngine`): exec arrives as `Bash` with `tool_input.command`
+   and a string `tool_response`; edits as `apply_patch` with the patch text in
+   `tool_input.command`. `engram-capture codex` labels the events; the patch's
+   first `*** Update/Add/Delete File:` path becomes the absolute target.
+   Codex runs hook commands through `cmd.exe` by default, so the commands have
+   no quotes or spaces; Stop is synchronous because `codex exec` exits before
+   an async Stop hook finishes. New hooks need a one-time trust approval in
+   Codex. Verified end to end with `codex exec` (prompt, Bash event, read-only
+   Bash as touch, apply_patch, turn end). Config: `docs/fork/codex-config.toml`;
+   Claude Code: `docs/fork/claude-settings.json`.
+
+   Project attribution per event now tries, in order: the written file, a
+   `cd`/`Set-Location`/`Push-Location` anywhere in a shell command, `git -C`,
+   absolute paths in its arguments, then the shell's own working directory —
+   which Claude Code reports per call. Only repository-backed answers count.
 5. Project profile
 6. `import claude-mem`; side-by-side quality run against claude-mem
 7. Switch over; remove claude-mem, the Ollama proxy and the watchdog

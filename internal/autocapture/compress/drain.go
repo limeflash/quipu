@@ -282,9 +282,10 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 	var order []string
 	for _, f := range events {
 		p := cwdProj
-		if dir := eventDir(f.ev); dir != "" {
+		for _, dir := range eventDirs(f.ev) {
 			if q := d.project(dir, true); q != "" {
 				p = q
+				break
 			}
 		}
 		if parts[p] == nil {
@@ -376,18 +377,46 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 	return nil
 }
 
-var leadingCD = regexp.MustCompile(`(?i)^\s*(?:cd|set-location|sl|pushd)\s+(?:-path\s+)?["']?([^"';&|\r\n]+?)["']?\s*(?:;|&&|\r?\n|$)`)
+var (
+	changeDirRe = regexp.MustCompile(`(?i)(?:^|[;&|{\n]\s*)(?:cd|set-location|sl|push-location|pushd)\s+(?:-(?:literal)?path\s+)?["']?([^"';&|}\r\n]+?)["']?\s*(?:;|&&|\||\}|\r?\n|$)`)
+	gitDirRe    = regexp.MustCompile(`(?i)\bgit\s+-C\s+["']?([^"'\s]+)`)
+	absPathRe   = regexp.MustCompile(`(?i)(?:\b[a-z]:[\\/][^\s"'|;&<>*?]+|(?:^|\s)/(?:home|users|mnt|srv|opt|work|tmp)/[^\s"'|;&<>*?]+)`)
+)
 
-// eventDir is where an event happened: the directory of an absolute file
-// target, or the directory a shell command starts by changing into.
-func eventDir(ev autocapture.Event) string {
-	if t := ev.Target; t != "" && filepath.IsAbs(t) {
-		return filepath.Dir(t)
+// eventDirs lists where an event may have happened, most specific first:
+// the file it wrote; for shell commands, a directory the command changes
+// into (anywhere in it, not only first), a git -C target, absolute paths in
+// its arguments; finally the shell's own working directory at the time,
+// which Claude Code reports per call. The caller takes the first one that
+// resolves to a repository.
+func eventDirs(ev autocapture.Event) []string {
+	var dirs []string
+	add := func(p string) {
+		if p = strings.TrimSpace(p); p != "" && filepath.IsAbs(p) {
+			dirs = append(dirs, p)
+		}
 	}
-	if m := leadingCD.FindStringSubmatch(ev.Input); m != nil && filepath.IsAbs(strings.TrimSpace(m[1])) {
-		return strings.TrimSpace(m[1])
+	if filepath.IsAbs(ev.Target) {
+		add(filepath.Dir(ev.Target))
 	}
-	return ""
+	if ev.Tool == "Bash" || ev.Tool == "PowerShell" {
+		if m := changeDirRe.FindStringSubmatch(ev.Input); m != nil {
+			add(m[1])
+		}
+		if m := gitDirRe.FindStringSubmatch(ev.Input); m != nil {
+			add(m[1])
+		}
+		for _, p := range absPathRe.FindAllString(ev.Input, 3) {
+			p = strings.TrimSpace(p)
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				add(p)
+			} else {
+				add(filepath.Dir(p))
+			}
+		}
+	}
+	add(ev.CWD)
+	return dirs
 }
 
 func recordedLine(typ, title, key string) string {

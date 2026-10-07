@@ -3,6 +3,7 @@ package autocapture
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,24 @@ func TestPromptAndTurnEnd(t *testing.T) {
 	raw, _ = json.Marshal(map[string]any{"session_id": "s1", "hook_event_name": "Stop", "last_assistant_message": "done"})
 	if ev = mustCapture(t, raw); ev.Output != "done" {
 		t.Fatalf("last_assistant_message should win, got %q", ev.Output)
+	}
+}
+
+// Codex sends exec as "Bash" with a command string and a string response, and
+// edits as "apply_patch" with the patch text in tool_input.command.
+func TestCodexPayloads(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: internal/db/store.go\n@@\n-busy_timeout=0\n+busy_timeout=5000\n*** End Patch"
+	ev := mustCapture(t, hook("apply_patch", map[string]any{"command": patch}, "Success. Updated the following files:\nM internal/db/store.go"))
+	want := filepath.Join(`C:\repo`, "internal/db/store.go")
+	if ev.Kind != KindEvent || ev.Target != want || !strings.Contains(ev.Input, "+busy_timeout=5000") {
+		t.Fatalf("got %+v (want target %q)", ev, want)
+	}
+	ev = mustCapture(t, hook("Bash", map[string]any{"command": "go test ./..."}, "ok  \tpkg\t0.2s"))
+	if ev.Kind != KindEvent || ev.Output != "ok  \tpkg\t0.2s" {
+		t.Fatalf("string tool_response not kept: %+v", ev)
+	}
+	if ev := mustCapture(t, hook("Bash", map[string]any{"command": "rg -n TODO src"}, "x")); ev.Kind != KindTouch {
+		t.Fatalf("read-only Codex exec must be a touch: %+v", ev)
 	}
 }
 
