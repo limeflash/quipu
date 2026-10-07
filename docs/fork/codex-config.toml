@@ -1,5 +1,5 @@
 # >>> engram autocapture >>>
-# Capture hooks and the read-only engram MCP server (limeflash/engram fork).
+# Capture hooks and the read-only engram MCP server (limeflash/quipu, an engram fork).
 # Commands avoid quotes and spaces so they run the same under cmd.exe and
 # PowerShell. Remove this block to switch it off.
 [[hooks.PostToolUse]]
