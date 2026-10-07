@@ -1,4 +1,4 @@
-# limeflash/engram — fork plan
+# limeflash/quipu — engram fork plan
 
 This fork adds **automatic capture** to engram: tool activity from Claude Code
 and Codex is compressed into engram observations by a cheap cloud model
