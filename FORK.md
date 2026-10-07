@@ -69,7 +69,7 @@ judgement turns into. So both stay, with agent saves ranking first:
 | 6 | **Turn summaries** written automatically on Stop (same Goal / Discoveries / Accomplished / Next Steps / Files shape as `mem_session_summary`) | `internal/autocapture` |
 | 7 | **Project profile**: stack from manifests, commands from successful runs, hot files from touches | `internal/autocapture/profile` |
 | 8 | **Codex capture**: `exec` events, edits detected as `apply_patch`, read-only commands dropped | `plugin/codex` + `hook codex-post-tool-use` |
-| 9 | `engram import claude-mem` | `cmd/engram/import_claudemem.go` |
+| 9 | `engram import claude-mem` | `cmd/engram/import_claudemem.go` ✅ |
 | 10 | Eval harness: recall set, junk audit, token cost, hook p95 | `internal/autocapture/eval` |
 
 The conflict judge (`ENGRAM_AGENT_CLI`) also gets the Ollama runner, so
@@ -151,8 +151,62 @@ They stay in the tree for clean rebases; nothing here depends on them.
    into the repository's), and a 3–6 sentence architecture overview — the only
    model call. SessionStart shows its one-line form;
    `engram autocapture profile [dir]` rebuilds it on demand.
-6. `import claude-mem`; side-by-side quality run against claude-mem
+6. ✅ `engram import claude-mem [--db PATH] [--root DIR]... [--map FROM=TO]...
+   [--dry-run]`: observations, turn summaries and prompts through
+   `Store.Import` with stable sync ids (`cm-obs-N`, `cm-sum-N`, `cm-prompt-N`),
+   so a rerun adds nothing. Worktree suffixes and paths collapse to the
+   repository; `--root` resolves names through engram's own detection
+   (inspect only, no binding written); leaked field names (`**title**: …`)
+   stripped, broken types mapped, records with only file lists kept;
+   everything redacted again; rows after the first auto-captured record of
+   the same session skipped. Imported records carry `tool_name = claude-mem`:
+   they rank with captured ones at session start, notes on code that was only
+   read rank last. Results and the comparison below.
 7. Switch over; remove claude-mem, the Ollama proxy and the watchdog
+
+## Milestone 6 results (2026-10-07)
+
+Import of `~/.claude-mem/claude-mem.db` (735 MB): 49,071 observations, 1,509
+turn summaries, 3,108 prompts, 38 sessions in 3.5 minutes; 8 records with no
+text and no files skipped, 366 broken types mapped, 5,011 leaked field
+prefixes stripped, 328 secrets redacted. 30 claude-mem project names became 22
+engram projects (`cs2farm-fresh` + 2 worktrees → `cs2farm`, `geo-guessr` →
+`tochka`, `deadlock-mods` → `soul-broker`, …).
+
+Running the redactor over 49k model-written records found false positives
+that also hit live capture, all fixed: a plain word followed by more words on
+the same line is prose, not a value ("Password: encrypted by the store");
+placeholders already in the input are kept instead of nesting; `curl -u` needs
+a real user name (`date -u +%H:%M:%S`); `--x` values are CSS properties or
+flags. Redactions went from 818 to 328; what remains is mostly real (server
+and SSH passwords, API keys, access tokens).
+
+Side by side on the same four sessions of 2026-10-07 — claude-mem until it
+was switched off, engram after; the two never ran at the same time:
+
+| | claude-mem | engram |
+|---|---|---|
+| records per hour of work | 270–330 | 36–66 |
+| share of `discovery` (notes on read code) | 65% | 29% |
+| model calls that day | 2,264 | 112 |
+| input tokens that day | 343.6 M (avg 152k/call, max 867k) | 0.72 M (avg 6.4k/call) |
+| input tokens on 2026-10-05 | 2.7 B | — |
+| blind audit, 60 random records each: useful / noise / duplicate | 14 / 45 / 1 | 45 / 11 / 4 |
+| junk share (target < 20%) | 77% | 25% |
+
+The audit: a Sonnet 5.5 judge saw the two samples as lists A and B with
+record bodies stripped of each system's field labels, one bar for both.
+claude-mem's noise is retold code and mockups, status ("tests pass",
+"committed", "agent launched") and navigation; engram's is minor refactors
+and UI polish recorded without a cause, plus the same bug or measurement
+written twice by different chunks of one session (title dedupe only catches
+exact repeats).
+
+Per hour that is still ~70 useful claude-mem records against ~37 engram ones,
+buried under three junk records each and at ~500× the input tokens. Whether
+engram misses facts that matter is what the recall set (milestone 2's eval
+harness, still to build) has to answer; cross-chunk duplicates are the next
+compressor fix.
 
 ## Milestone 2 results (2026-10-07, real sessions, deepseek-v4.1-flash)
 
