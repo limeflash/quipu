@@ -151,6 +151,19 @@ In a session the agent uses the MCP tools; asking "what did we decide about X in
 
 Redaction happens in the hook, before the event touches the disk. What leaves the machine is the compressor's batches — to Ollama Cloud, or, when the fallbacks fire, to OpenAI through your Codex login and to Anthropic through your Claude plan. Reads are never sent with their contents. Memory itself stays in the local `~/.engram/engram.db`.
 
+## Cloud sync (inherited from engram)
+
+quipu keeps engram's optional cloud, unused in the author's setup: local SQLite remains the source of truth, and the cloud only adds replication/shared access between machines. Upgrading an existing local project to it runs doctor → repair → bootstrap → status:
+
+```bash
+engram cloud upgrade doctor --project <name>
+engram cloud upgrade repair --project <name>
+engram cloud upgrade bootstrap --project <name>
+engram cloud upgrade status --project <name>
+```
+
+Details: [docs/engram-cloud/README.md](docs/engram-cloud/README.md) and [DOCS.md](DOCS.md).
+
 ## Staying on upstream
 
 Fork-only code lives in new packages (`internal/autocapture`, `internal/redact`, `cmd/engram-capture`, `cmd/engram/import_claudemem.go`); core files are touched only at a few seams, so:
