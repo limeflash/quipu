@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ type Sink interface {
 	DetectProject(directory string) project.DetectionResult
 	CreateSession(id, project, directory string) error
 	AddObservation(p store.AddObservationParams) (int64, error)
-	SessionObservations(sessionID string, limit int) ([]store.Observation, error)
+	RecentSessionObservations(sessionID string, limit int) ([]store.Observation, error)
 }
 
 // ToolName marks every observation this package writes, so search and
@@ -477,31 +478,34 @@ func (d *drainer) write(p store.AddObservationParams) error {
 // records included — so the model does not restate it.
 func (d *drainer) existing(sessionID string) (recorded []string, prevSummary string, titles map[string]bool) {
 	titles = map[string]bool{}
-	obs, err := d.sink.SessionObservations(sessionID, 200) // oldest first
+	// Most recently updated first, so the summary — upserted every turn — and
+	// the latest records are found even when the session's oldest rows are
+	// hundreds of imported or long-finished ones.
+	obs, err := d.sink.RecentSessionObservations(sessionID, 200)
 	if err != nil {
 		return nil, "", titles
 	}
-	defer func() {
-		if len(recorded) > 40 {
-			recorded = recorded[len(recorded)-40:]
-		}
-	}()
 	key := "session/" + safeName(sessionID)
 	for _, o := range obs {
 		if o.TopicKey != nil && *o.TopicKey == key {
-			prevSummary = o.Content
+			if prevSummary == "" { // a session that touched several projects has one per project
+				prevSummary = o.Content
+			}
 			continue
 		}
 		if o.Type == "session_summary" {
 			continue
 		}
 		titles[strings.ToLower(o.Title)] = true
-		k := ""
-		if o.TopicKey != nil {
-			k = *o.TopicKey
+		if len(recorded) < 40 {
+			k := ""
+			if o.TopicKey != nil {
+				k = *o.TopicKey
+			}
+			recorded = append(recorded, recordedLine(o.Type, o.Title, k))
 		}
-		recorded = append(recorded, recordedLine(o.Type, o.Title, k))
 	}
+	slices.Reverse(recorded) // the prompt lists them oldest first
 	return recorded, prevSummary, titles
 }
 
