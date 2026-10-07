@@ -37,10 +37,10 @@ func newCodex(cfg Config, dataDir string) *codexClient {
 // properties, the summary null when it was not asked for.
 const codexSchema = `{"type":"object","additionalProperties":false,"required":["observations","summary"],"properties":{` +
 	`"observations":{"type":"array","items":{"type":"object","additionalProperties":false,` +
-	`"required":["type","title","what","why","where","learned","topic_key"],"properties":{` +
+	`"required":["type","title","what","why","where","learned","topic_key","updates"],"properties":{` +
 	`"type":{"type":"string","enum":["decision","architecture","bugfix","feature","refactor","config","pattern","discovery","learning"]},` +
 	`"title":{"type":"string"},"what":{"type":"string"},"why":{"type":"string"},"where":{"type":"string"},` +
-	`"learned":{"type":"string"},"topic_key":{"type":"string"}}}},` +
+	`"learned":{"type":"string"},"topic_key":{"type":"string"},"updates":{"anyOf":[{"type":"integer"},{"type":"null"}]}}}},` +
 	`"summary":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,` +
 	`"required":["goal","discoveries","accomplished","next_steps","files"],"properties":{` +
 	`"goal":{"type":"string"},"discoveries":{"type":"array","items":{"type":"string"}},` +

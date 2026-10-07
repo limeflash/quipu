@@ -35,8 +35,8 @@ func cmdAutocapture(cfg store.Config) {
 			fmt.Println("another drain is running; try again later")
 			return
 		}
-		fmt.Printf("sessions %d, calls %d, observations %d, summaries %d, deferred %d, failed %d, tokens in %d / out %d\n",
-			rep.Sessions, rep.Calls, rep.Observations, rep.Summaries, rep.Deferred, rep.Failed, rep.Usage.In, rep.Usage.Out)
+		fmt.Printf("sessions %d, calls %d, observations %d, updated %d, summaries %d, deferred %d, failed %d, tokens in %d / out %d\n",
+			rep.Sessions, rep.Calls, rep.Observations, rep.Updated, rep.Summaries, rep.Deferred, rep.Failed, rep.Usage.In, rep.Usage.Out)
 		if err != nil {
 			fatal(err)
 		}
