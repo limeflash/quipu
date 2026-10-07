@@ -14,6 +14,25 @@ adds a second one that needs no discipline from the agent.
 Background and the full rationale (failures observed with claude-mem, a survey
 of 25+ memory projects): [docs/fork/DESIGN.md](docs/fork/DESIGN.md).
 
+## Two write paths, one memory
+
+| | Agent saves (`mem_save`, upstream) | Auto-capture (this fork) |
+|---|---|---|
+| Quality per record | high — the agent knows *why* | lower — inferred from what was done |
+| Coverage | only what the agent remembers to save | everything that changed state |
+| Who pays | the main model (most expensive tokens) | a cheap cloud model, or Sonnet as fallback |
+| Typical misses | long sessions, subagents, after compaction, a forgotten save | the reasoning behind a change |
+
+Neither alone is enough: upstream already ships a 15-minute "MEMORY REMINDER"
+nudge because agents forget to save; claude-mem showed what capture without
+judgement turns into. So both stay, with agent saves ranking first:
+
+- the compressor sees what the agent already saved in the session and does not
+  restate it (titles in the prompt, `topic_key` upserts, engram's dedupe);
+- auto observations are marked as such and rank below agent-written ones in
+  search and context injection;
+- the eval (milestone 2) measures which path actually answers questions.
+
 ## Ground rules
 
 1. **Additive.** New behaviour lives in new packages and new migrations.
@@ -42,8 +61,8 @@ of 25+ memory projects): [docs/fork/DESIGN.md](docs/fork/DESIGN.md).
 
 | # | Feature | Where |
 |---|---|---|
-| 1 | **Native Go hooks** for every Claude Code event (no bash, no `curl`, no `jq`, no `engram serve` needed for capture) | `cmd/engram` `hook claude-*`, extend the existing `hook` dispatcher |
-| 2 | **Capture spool**: PostToolUse writes one redacted, truncated event; reads become content-free *touches* | `internal/autocapture/spool` |
+| 1 | **Capture hook** for PostToolUse: native Go, no bash / `curl` / `jq` / `engram serve`; opt-in via `~/.engram/autocapture.json` | `cmd/engram-capture`, `internal/autocapture` ✅ |
+| 2 | **Capture spool**: one redacted, truncated event per state-changing call; reads become content-free *touches* | `internal/autocapture` ✅, secrets: `internal/redact` ✅ |
 | 3 | **Compressor**: batches a session's events into observations via `Store.AddObservation`; runs as a lease-guarded goroutine in `engram mcp` (and `engram serve`), like autosync | `internal/autocapture` |
 | 4 | **Ollama Cloud runner** (native `/api/chat`), local JSON-schema validation + one repair retry, 429/410 handling, model chain | `internal/llm/ollama.go` |
 | 5 | **Claude fallback**: `ClaudeRunner` gains model/effort config (`claude-sonnet-5-5`, `high`), `--json-schema`, env scrubbing, `claude setup-token` auth, hourly budget | `internal/llm/claude.go` |
@@ -56,15 +75,29 @@ of 25+ memory projects): [docs/fork/DESIGN.md](docs/fork/DESIGN.md).
 The conflict judge (`ENGRAM_AGENT_CLI`) also gets the Ollama runner, so
 judging stops costing Claude Haiku calls.
 
-### Hot path decision (milestone 1)
+### Hot path (decided in milestone 1, measured on Windows 11, 2026-10-07)
 
-Two candidates for what a PostToolUse hook does; pick by measurement on
-Windows, p95 target < 50 ms:
+The PostToolUse hook writes one small JSON file into `~/.engram/spool/`
+(unique name, temp-then-rename, no locks, no store) and exits; the compressor
+ingests and deletes. It ships as a separate binary, `engram-capture`, because
+on Windows process start cost tracks image size:
 
-- **A — spool file**: write one small JSON file into `~/.engram/spool/`
-  (unique name, no locks, no DB open). The compressor ingests and deletes.
-- **B — direct insert**: `store.New` + one INSERT. Simpler, but engram's store
-  open runs migration checks; measure before choosing.
+| What runs per tool call | p50 | p95 |
+|---|---|---|
+| `engram-capture` (3.9 MB), Edit | 41 ms | 46 ms |
+| `engram-capture`, Bash with 200 KB output | 55 ms | 62 ms |
+| `engram-capture`, Read (touch) | 38 ms | 41 ms |
+| `engram hook claude-post-tool-use` (30 MB), Edit | 121 ms | 138 ms |
+| `engram stats` — what opening the store costs | 588 ms | 657 ms |
+
+Go's own init is 5 ms; the rest of the 30 MB binary's ~110 ms floor is the OS
+loading and scanning the image (a 2 MB hello-world starts in 19 ms). The hook
+is also `async`, so the agent never waits on it.
+
+engram's own hooks (SessionStart, UserPromptSubmit, SessionEnd, SubagentStop)
+stay as upstream ships them: they talk to `engram serve`, which owns session
+identity, and none of them runs per tool call. They are replaced only if
+measurements show they hurt.
 
 ## Not used in our setup (kept, untouched)
 
@@ -73,7 +106,9 @@ They stay in the tree for clean rebases; nothing here depends on them.
 
 ## Milestones
 
-1. Native Claude Code hooks + spool + touches; hot-path measurement; eval harness skeleton
+1. ✅ Capture hook + spool + touches + secret redaction; hot-path measurement
+   (the eval harness moves to milestone 2 — there is nothing to evaluate until
+   observations are generated)
 2. Ollama runner + compressor + turn summaries (Claude Code)
 3. Claude Sonnet fallback + budget
 4. Codex capture

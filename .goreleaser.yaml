@@ -6,7 +6,24 @@ release:
   prerelease: auto
 
 builds:
-  - main: ./cmd/engram
+  # Fork: the PostToolUse capture hook ships as its own small binary because
+  # it runs on every tool call (see cmd/engram-capture).
+  - id: engram-capture
+    main: ./cmd/engram-capture
+    binary: engram-capture
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+  - id: engram
+    main: ./cmd/engram
     binary: engram
     env:
       - CGO_ENABLED=0
