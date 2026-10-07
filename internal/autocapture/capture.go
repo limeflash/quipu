@@ -8,6 +8,8 @@ package autocapture
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -25,9 +27,15 @@ const (
 	// is kept — in claude-mem 58% of observations paraphrased code that was
 	// only read, which is where the tokens went.
 	KindTouch = "touch"
+	// KindPrompt is what the user asked (UserPromptSubmit).
+	KindPrompt = "prompt"
+	// KindTurnEnd marks the end of an agent turn (Stop) and carries the
+	// agent's final message; it triggers compression and the session summary.
+	KindTurnEnd = "turn_end"
 
 	maxContent = 4096 // per input / output, head + tail
 	maxTarget  = 300
+	maxPrompt  = 2048
 )
 
 // Event is one spooled tool call.
@@ -45,21 +53,44 @@ type Event struct {
 }
 
 type claudeInput struct {
-	SessionID    string          `json:"session_id"`
-	CWD          string          `json:"cwd"`
-	ToolName     string          `json:"tool_name"`
-	ToolInput    map[string]any  `json:"tool_input"`
-	ToolResponse json.RawMessage `json:"tool_response"`
+	SessionID      string          `json:"session_id"`
+	CWD            string          `json:"cwd"`
+	HookEventName  string          `json:"hook_event_name"`
+	ToolName       string          `json:"tool_name"`
+	ToolInput      map[string]any  `json:"tool_input"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
+	Prompt         string          `json:"prompt"`
+	TranscriptPath string          `json:"transcript_path"`
+	LastAssistant  string          `json:"last_assistant_message"`
 }
 
-// FromClaude turns one Claude Code PostToolUse payload into an event.
-// ok is false when the call is not worth recording.
+// FromClaude turns one Claude Code hook payload (PostToolUse,
+// UserPromptSubmit or Stop) into an event. ok is false when there is nothing
+// worth recording.
 func FromClaude(raw []byte, now time.Time) (ev Event, ok bool) {
 	var in claudeInput
-	if json.Unmarshal(raw, &in) != nil || in.SessionID == "" || in.ToolName == "" {
+	if json.Unmarshal(raw, &in) != nil || in.SessionID == "" {
 		return Event{}, false
 	}
 	ev = Event{V: 1, Agent: "claude", SessionID: in.SessionID, CWD: in.CWD, Tool: in.ToolName, At: now.UTC()}
+	switch in.HookEventName {
+	case "UserPromptSubmit":
+		if strings.TrimSpace(in.Prompt) == "" {
+			return Event{}, false
+		}
+		ev.Kind, ev.Input = KindPrompt, cleanText(in.Prompt, maxPrompt)
+		return ev, true
+	case "Stop":
+		last := in.LastAssistant
+		if last == "" {
+			last = lastAssistantText(in.TranscriptPath)
+		}
+		ev.Kind, ev.Output = KindTurnEnd, cleanText(last, maxContent)
+		return ev, true
+	}
+	if in.ToolName == "" {
+		return Event{}, false
+	}
 	arg := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
 
 	switch in.ToolName {
@@ -131,20 +162,69 @@ func clean(ev Event) Event {
 	if ev.Kind == KindEvent && sensitivePath(ev.Target) {
 		ev.Input, ev.Output = "[content withheld: sensitive file]", ""
 	}
-	field := func(s string, limit int) string {
-		s = privateRe.ReplaceAllString(s, "[private]")
-		if binary(s) {
-			return fmt.Sprintf("[binary %d bytes]", len(s))
-		}
-		s = truncate(s, 4*limit)
-		s = stripBase64(s)
-		s = redact.String(s)
-		return truncate(s, limit)
-	}
-	ev.Target = field(ev.Target, maxTarget)
-	ev.Input = field(ev.Input, maxContent)
-	ev.Output = field(ev.Output, maxContent)
+	ev.Target = cleanText(ev.Target, maxTarget)
+	ev.Input = cleanText(ev.Input, maxContent)
+	ev.Output = cleanText(ev.Output, maxContent)
 	return ev
+}
+
+func cleanText(s string, limit int) string {
+	s = privateRe.ReplaceAllString(s, "[private]")
+	if binary(s) {
+		return fmt.Sprintf("[binary %d bytes]", len(s))
+	}
+	s = truncate(s, 4*limit)
+	s = stripBase64(s)
+	s = redact.String(s)
+	return truncate(s, limit)
+}
+
+// lastAssistantText returns the text of the agent's final message from the
+// tail of a Claude Code transcript. Only the tail is read: transcripts grow
+// to many megabytes and the hook must stay fast.
+func lastAssistantText(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const tail = 512 << 10
+	if st, err := f.Stat(); err == nil && st.Size() > tail {
+		_, _ = f.Seek(-tail, io.SeekEnd)
+	}
+	data, _ := io.ReadAll(f)
+	lines := strings.Split(string(data), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var line struct {
+			Type    string `json:"type"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(lines[i]), &line) != nil || line.Type != "assistant" {
+			continue
+		}
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(line.Message.Content, &blocks) != nil {
+			continue
+		}
+		var b strings.Builder
+		for _, bl := range blocks {
+			if bl.Type == "text" {
+				b.WriteString(bl.Text)
+			}
+		}
+		if b.Len() > 0 {
+			return b.String()
+		}
+	}
+	return ""
 }
 
 var (

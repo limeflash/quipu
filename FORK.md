@@ -109,12 +109,45 @@ They stay in the tree for clean rebases; nothing here depends on them.
 1. ✅ Capture hook + spool + touches + secret redaction; hot-path measurement
    (the eval harness moves to milestone 2 — there is nothing to evaluate until
    observations are generated)
-2. Ollama runner + compressor + turn summaries (Claude Code)
+2. ✅ Ollama runner + compressor + turn summaries (Claude Code) — results below
 3. Claude Sonnet fallback + budget
 4. Codex capture
 5. Project profile
 6. `import claude-mem`; side-by-side quality run against claude-mem
 7. Switch over; remove claude-mem, the Ollama proxy and the watchdog
+
+## Milestone 2 results (2026-10-07, real sessions, deepseek-v4.1-flash)
+
+`engram autocapture drain --dry-run` runs the model without writing, so prompt
+changes are compared on the same spool before anything reaches memory.
+
+| | First prompt | Tightened prompt | Real drain |
+|---|---|---|---|
+| events in | 112 | ~150 | ~170 |
+| model calls | 10 | 13 | 15 |
+| input tokens per call | ~7.8k | ~7.4k | ~7.4k |
+| records | 59 | 54 | 69 → 66 rows (engram dedupe / topic upserts) |
+| status snapshots ("tests pass", "committed X") | ~15% | ~0 | — |
+| records carrying a `topic_key` | nearly all | decision/architecture/config/pattern only | — |
+
+For comparison, claude-mem sent ~190k input tokens per call on the same
+machine. What the review of run 1 changed:
+
+- **topic_key** is honoured only for evolving types and only once per reply:
+  the model put one key on three different records, and an engram topic upsert
+  replaces the record in place.
+- **Project per event**: an edit belongs to the repository its file lives in
+  (and a shell command to the directory its leading `cd` enters); scratch and
+  temp directories never become projects. One session had edited four repos.
+- **Exact title repeats** within a session are dropped in code — the model
+  restated "already recorded" items now and then.
+- Status snapshots, commit/push/deploy notices and trivial compile errors are
+  excluded in the prompt; at most 8 records per call.
+
+Known gaps: session summaries need the Stop hook (installed after this run);
+SessionStart context injection is not wired yet (`engram context` is ~1.7k
+tokens of recent snippets, more than the 800-token index the design wants);
+a formal junk audit waits for a few days of data.
 
 ## Syncing with upstream
 
