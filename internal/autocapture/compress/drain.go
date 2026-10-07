@@ -50,6 +50,7 @@ type Report struct {
 	Summaries    int
 	Deferred     int // sessions not ready yet
 	Failed       int // sessions put back for a later retry
+	Profiles     int // project profiles rebuilt
 	Usage        usage
 }
 
@@ -64,6 +65,7 @@ type drainer struct {
 	dryRun  bool
 	out     func(string) // dry-run printer
 	projs   map[string]string
+	roots   map[string]string // project -> repository root, for profiles
 }
 
 type spooled struct {
@@ -77,7 +79,7 @@ func Drain(ctx context.Context, sink Sink, gen generator, cfg Config, dataDir st
 	_, _ = rand.Read(rnd[:])
 	d := &drainer{sink: sink, gen: gen, cfg: cfg, dataDir: dataDir, spool: autocapture.SpoolDir(dataDir),
 		owner: fmt.Sprintf("%d-%s", os.Getpid(), hex.EncodeToString(rnd[:])), now: now, dryRun: dryRun, out: out,
-		projs: map[string]string{}}
+		projs: map[string]string{}, roots: map[string]string{}}
 	return d.run(ctx)
 }
 
@@ -120,7 +122,36 @@ func (d *drainer) run(ctx context.Context) (Report, error) {
 			}
 		}
 	}
+	d.refreshProfiles(ctx, &rep)
 	return rep, nil
+}
+
+// refreshProfiles rebuilds the profiles of the repositories this drain saw
+// work in; refreshProfile itself decides whether one is due.
+func (d *drainer) refreshProfiles(ctx context.Context, rep *Report) {
+	if len(d.roots) == 0 {
+		return
+	}
+	profiles := loadProfiles(d.dataDir)
+	names := make([]string, 0, len(d.roots))
+	for p := range d.roots {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	for _, p := range names {
+		if ctx.Err() != nil {
+			break
+		}
+		content, err := d.refreshProfile(ctx, p, d.roots[p], profiles, false)
+		if err != nil {
+			logLine(d.dataDir, "profile "+p+": "+err.Error())
+		} else if content != "" {
+			rep.Profiles++
+		}
+	}
+	if !d.dryRun {
+		saveProfiles(d.dataDir, profiles)
+	}
 }
 
 func (d *drainer) readSpool() (map[string][]spooled, error) {
@@ -233,6 +264,9 @@ func (d *drainer) project(dir string, strict bool) string {
 		switch res.Source {
 		case project.SourceConfig, project.SourceGitRemote, project.SourceGitRoot, project.SourceGitChild, project.SourceProcessOverride:
 			p = res.Project
+			if p != "" && res.Path != "" {
+				d.roots[p] = res.Path
+			}
 		default:
 			if !strict {
 				p = res.Project
@@ -278,16 +312,18 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 	cwdProj := d.project(cwd, false)
 	// One session often edits several repositories; an edit belongs to the repo
 	// its file lives in, not to wherever the session was started.
+	projectOf := func(ev autocapture.Event) string {
+		for _, dir := range eventDirs(ev) {
+			if q := d.project(dir, true); q != "" {
+				return q
+			}
+		}
+		return cwdProj
+	}
 	parts := map[string][]spooled{}
 	var order []string
 	for _, f := range events {
-		p := cwdProj
-		for _, dir := range eventDirs(f.ev) {
-			if q := d.project(dir, true); q != "" {
-				p = q
-				break
-			}
-		}
+		p := projectOf(f.ev)
 		if parts[p] == nil {
 			order = append(order, p)
 		}
@@ -295,7 +331,7 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 	}
 	wantSummary := turnEnded && (len(events) > 0 || len(final) >= minFinalForSummary)
 	if len(events) == 0 && !wantSummary {
-		d.appendTouches(sessionID, cwdProj, files)
+		d.appendActivity(sessionID, files, projectOf)
 		return nil
 	}
 	if len(order) == 0 {
@@ -373,7 +409,7 @@ func (d *drainer) session(ctx context.Context, sessionID string, files []spooled
 			}
 		}
 	}
-	d.appendTouches(sessionID, cwdProj, files)
+	d.appendActivity(sessionID, files, projectOf)
 	return nil
 }
 
@@ -488,9 +524,10 @@ func chunkEvents(events []spooled, maxChars int) [][]spooled {
 	return chunks
 }
 
-// appendTouches keeps reads for the project profile (milestone 5). Called
-// only once a session succeeded, so a retry does not write them twice.
-func (d *drainer) appendTouches(sessionID, proj string, files []spooled) {
+// appendActivity logs reads, edits and commands per project for the project
+// profile: hot files and the commands actually run. Called only once a
+// session succeeded, so a retry does not write them twice.
+func (d *drainer) appendActivity(sessionID string, files []spooled, projectOf func(autocapture.Event) string) {
 	if d.dryRun {
 		return
 	}
@@ -501,9 +538,19 @@ func (d *drainer) appendTouches(sessionID, proj string, files []spooled) {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	for _, s := range files {
-		if s.ev.Kind == autocapture.KindTouch {
-			_ = enc.Encode(map[string]any{"at": s.ev.At, "session": sessionID, "project": proj, "tool": s.ev.Tool, "target": s.ev.Target})
+		kind, target := "", s.ev.Target
+		switch {
+		case s.ev.Kind == autocapture.KindTouch:
+			kind = "read"
+		case s.ev.Kind == autocapture.KindEvent && (s.ev.Tool == "Bash" || s.ev.Tool == "PowerShell"):
+			kind, target = "cmd", firstLine(s.ev.Input)
+		case s.ev.Kind == autocapture.KindEvent && filepath.IsAbs(s.ev.Target):
+			kind = "edit"
+		default:
+			continue
 		}
+		_ = enc.Encode(map[string]any{"at": s.ev.At, "session": sessionID, "project": projectOf(s.ev),
+			"tool": s.ev.Tool, "kind": kind, "target": target})
 	}
 }
 

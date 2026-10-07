@@ -141,7 +141,16 @@ They stay in the tree for clean rebases; nothing here depends on them.
    `cd`/`Set-Location`/`Push-Location` anywhere in a shell command, `git -C`,
    absolute paths in its arguments, then the shell's own working directory —
    which Claude Code reports per call. Only repository-backed answers count.
-5. Project profile
+5. ✅ Project profile: one `project_profile` record per repository (topic key
+   `profile/<project>`), rebuilt at most daily or when a manifest changes:
+   stack from manifests (go.mod, package.json, Gradle, Cargo, csproj,
+   Dockerfile, wrangler, …; line-based, `golang.org/x/*` and indirect deps
+   skipped), languages and layout from one tree walk, commands actually run
+   and most-touched files from the activity log (`touches.jsonl`, now with
+   per-event project and `read`/`edit`/`cmd` kinds; worktree paths folded
+   into the repository's), and a 3–6 sentence architecture overview — the only
+   model call. SessionStart shows its one-line form;
+   `engram autocapture profile [dir]` rebuilds it on demand.
 6. `import claude-mem`; side-by-side quality run against claude-mem
 7. Switch over; remove claude-mem, the Ollama proxy and the watchdog
 
