@@ -51,7 +51,7 @@ func (f *fakeSink) AddObservation(p store.AddObservationParams) (int64, error) {
 	f.obs = append(f.obs, p)
 	return int64(len(f.obs)), nil
 }
-func (f *fakeSink) SessionObservations(string, int) ([]store.Observation, error) {
+func (f *fakeSink) RecentSessionObservations(string, int) ([]store.Observation, error) {
 	return f.existing, nil
 }
 
@@ -587,5 +587,29 @@ func TestOllamaClient(t *testing.T) {
 		if !errors.As(err, &ce) || ce.Kind != c.kind {
 			t.Errorf("HTTP %d %s: got %v, want kind %s", c.status, c.body, err, c.kind)
 		}
+	}
+}
+
+func TestExistingFindsSummaryPastImportedHistory(t *testing.T) {
+	key := "session/s"
+	obs := []store.Observation{ // newest first, as RecentSessionObservations returns them
+		{Type: "session_summary", Title: "Session summary: p", Content: "## Goal\nlatest", TopicKey: &key},
+		{Type: "bugfix", Title: "newest record"},
+		{Type: "feature", Title: "older record"},
+		{Type: "session_summary", Title: "Session summary: imported turn"},
+	}
+	for i := 0; i < 300; i++ {
+		obs = append(obs, store.Observation{Type: "discovery", Title: fmt.Sprintf("imported %d", i)})
+	}
+	d := &drainer{sink: &fakeSink{existing: obs}}
+	recorded, prev, titles := d.existing("s")
+	if prev != "## Goal\nlatest" {
+		t.Fatalf("summary not found: %q", prev)
+	}
+	if len(recorded) != 40 || !strings.Contains(recorded[39], "newest record") || !strings.Contains(recorded[38], "older record") {
+		t.Fatalf("want the 40 newest, oldest first; got %v … %v", recorded[:2], recorded[38:])
+	}
+	if !titles["newest record"] || titles["session summary: imported turn"] {
+		t.Fatalf("titles %v", len(titles))
 	}
 }
