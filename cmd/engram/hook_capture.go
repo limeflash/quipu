@@ -12,5 +12,5 @@ import (
 // point keeps the hook working where only engram is installed.
 func cmdHookCapture() {
 	time.AfterFunc(autocapture.HookDeadline, func() { os.Exit(0) })
-	autocapture.RunClaudeHook(os.Stdin, os.Stderr)
+	autocapture.RunHook("claude", os.Stdin, os.Stderr)
 }

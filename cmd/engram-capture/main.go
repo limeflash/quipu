@@ -1,4 +1,6 @@
-// engram-capture is the Claude Code PostToolUse hook as its own small binary.
+// engram-capture is the capture hook (PostToolUse, UserPromptSubmit, Stop)
+// for Claude Code and — with the argument "codex" — Codex, as its own small
+// binary.
 //
 // It runs on every tool call, and on Windows a process start costs roughly in
 // proportion to image size: a 2 MB Go binary starts in ~20 ms, the 30 MB
@@ -15,5 +17,9 @@ import (
 
 func main() {
 	time.AfterFunc(autocapture.HookDeadline, func() { os.Exit(0) })
-	autocapture.RunClaudeHook(os.Stdin, os.Stderr)
+	agent := "claude"
+	if len(os.Args) > 1 {
+		agent = os.Args[1]
+	}
+	autocapture.RunHook(agent, os.Stdin, os.Stderr)
 }

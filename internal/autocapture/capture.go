@@ -110,6 +110,12 @@ func FromClaude(raw []byte, now time.Time) (ev Event, ok bool) {
 		ev.Input = b.String()
 	case "Write":
 		ev.Kind, ev.Target, ev.Input = KindEvent, arg("file_path"), arg("content")
+	case "apply_patch": // Codex: the patch text arrives as tool_input.command
+		patch := arg("command")
+		if strings.TrimSpace(patch) == "" {
+			return Event{}, false
+		}
+		ev.Kind, ev.Target, ev.Input = KindEvent, patchFile(patch, in.CWD), patch
 	case "NotebookEdit":
 		ev.Kind, ev.Target, ev.Input = KindEvent, arg("notebook_path"), arg("new_source")
 	case "Bash", "PowerShell":
@@ -166,6 +172,22 @@ func clean(ev Event) Event {
 	ev.Input = cleanText(ev.Input, maxContent)
 	ev.Output = cleanText(ev.Output, maxContent)
 	return ev
+}
+
+var patchFileRe = regexp.MustCompile(`(?m)^\*\*\* (?:Update|Add|Delete) File: (.+?)\s*$`)
+
+// patchFile names the first file a Codex patch touches, made absolute against
+// the session directory so the compressor can tell which repository it is in.
+func patchFile(patch, cwd string) string {
+	m := patchFileRe.FindStringSubmatch(patch)
+	if m == nil {
+		return ""
+	}
+	p := m[1]
+	if !filepath.IsAbs(p) && cwd != "" {
+		p = filepath.Join(cwd, p)
+	}
+	return p
 }
 
 func cleanText(s string, limit int) string {
