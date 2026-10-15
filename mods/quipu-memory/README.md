@@ -1,14 +1,16 @@
 # quipu-memory
 
-A Claude Code mod: a live **Память** panel for your quipu/engram memory, beside the conversation in Claude Desktop (and as text in a terminal pane).
+A Claude Code mod for your quipu/engram memory, with its own line icons (a quipu — the knotted cord the project is named after — for the memory itself), light and dark alike.
 
-- **Tiles**: records in this repo, today's count and the week's, the whole memory (records, projects, database size), events waiting in the spool, which model is writing and how many are paused.
-- **Activity, 14 days**: records stacked by type, model tokens as a line; hover a day for its breakdown, calls and errors.
-- **Who writes the memory**: the backend chain in try order — ready, paused until when (with the last error), disabled.
-- **This project**: its records by type, the latest session's goal and next steps, the twelve latest records — click one to read it, *В запрос* puts a reference to it into the prompt.
-- **Projects**: the ten most recently active, square-root bars of captured vs other records, the current repo always listed.
+**A band above the prompt**, one line: the whole memory, today's new records in green, a fourteen-day spark line, which model is writing (amber when some are paused) and a queue warning when compression falls behind. *Открыть ›* opens the panel; *Скрыть* hides the band for good (it is remembered across sessions, and the status line takes over); `/memory` brings both back.
 
-It reads `engram autocapture stats --json` every minute (the first read resolves the repo through git, later ones pass `--project`) and shows a one-line summary in the status line. The panel opens by itself when the desktop attaches; `/memory` opens it anywhere.
+**A slim panel** beside the conversation, in three tabs:
+
+- **Обзор**: four tiles (this repo, today and the week, the whole memory, the spool), fourteen days of records stacked by type with model tokens as a line (hover a day for its breakdown, calls and errors), and the backend chain — ready, paused until when and why, disabled.
+- **Записи**: the latest session's goal and next steps, this repo's records by type, its twelve latest records — click one to read it, *В запрос* quotes it into the prompt.
+- **Проекты**: the ten most recently active, square-root bars of captured vs other records, the current repo always listed.
+
+It reads `engram autocapture stats --json` every minute in the background (the first read resolves the repo through git, later ones pass `--project`). The panel opens by itself when the desktop attaches; closed, `/memory` reopens it.
 
 ## Install
 

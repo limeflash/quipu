@@ -1,7 +1,8 @@
+import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import type { MemoryDay, MemoryStats } from '../types'
-import { activitySvg, niceMax, projectsSvg } from './charts'
+import { activitySvg, niceMax, projectsSvg, sparkSvg, tilesSvg } from './charts'
 import { compact, int } from './format'
 
 const DAYS: MemoryDay[] = Array.from({ length: 14 }, (_, i): MemoryDay => ({
@@ -71,7 +72,7 @@ test('the activity chart has one tooltip per day and a legend', () => {
   expect((svg.match(/<g class="col"><title>/g) ?? []).length).toBe(14)
   expect(svg).toContain('130 записей: баг 13, фича 117')
   expect(svg).toContain('ошибок 1')
-  expect(svg).toContain('токены моделей')
+  expect(svg).toContain('токены')
   expect(svg).toContain('prefers-color-scheme:dark')
 })
 
@@ -81,31 +82,82 @@ test('the projects chart marks the current project', () => {
   expect(svg).toContain('19,9 тыс.')
 })
 
-test('the pane loads the stats, then opens a record', async ($, on) => {
+test('tiles carry an icon each and wrap two to a row', () => {
+  const svg = tilesSvg(
+    [
+      { icon: 'folder', value: '72', label: 'В проекте', color: '#D97757' },
+      { icon: 'trend', value: '+263', label: 'Сегодня', color: '#10B981' },
+      { icon: 'database', value: '57 тыс.', label: 'Вся память', color: '#6366F1' },
+    ],
+    400,
+    2,
+  )
+  expect((svg.match(/<g transform="translate/g) ?? []).length).toBe(3)
+  expect(svg).toContain('height="140"')
+})
+
+test('the spark line marks today', () => {
+  const svg = sparkSvg(DAYS, 70, 16)
+  expect((svg.match(/<rect /g) ?? []).length).toBe(14)
+  expect(svg).toContain('opacity="1"')
+})
+
+function stub(on: On) {
   mock.clock(on, { now: Date.parse('2026-10-15T12:00:00Z') })
   mock.env(on, {})
+  mock.store(on, {})
   on('session.cwd', () => ({ value: 'C:/code/quipu' }))
   on('process.run', (_$, e) =>
     e.argv.includes('stats')
       ? { value: { exitCode: 0, stdout: JSON.stringify(STATS), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       : { value: { exitCode: 1, stdout: '', stderr: 'unexpected', isStdoutTruncated: false, isStderrTruncated: false } },
   )
+}
+
+test('the pane loads the stats, switches tabs and opens a record', async ($, on) => {
+  stub(on)
 
   const desktop = await $.ui.mount({ plugin: 'quipu-memory', surface: 'desktop', component: 'Pane', props: PANE, requestId: 'quipu-memory' })
   expect(await desktop.find({ text: /Загружаю память/ })).toBeDefined()
   await desktop.press({ key: 'load' })
 
-  expect(await desktop.find({ text: 'Память · engram' })).toBeDefined()
+  expect(await desktop.find({ text: '· engram' })).toBeDefined()
   const alts = (await desktop.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))
-  expect(alts.some(alt => alt.includes('В этом проекте: 72'))).toBe(true)
-  expect(alts.length).toBe(4)
+  expect(alts.some(alt => alt.includes('В проекте: 72'))).toBe(true)
   expect(await desktop.find({ text: /пауза до/ })).toBeDefined()
-  expect(await desktop.find({ key: 'ask-501' })).toBeUndefined()
+  expect(await desktop.find({ key: 'rec-501' })).toBeUndefined()
 
+  await desktop.press({ key: 'tab-records' })
+  expect(await desktop.find({ text: /Последняя сессия/ })).toBeDefined()
   await desktop.press({ key: 'rec-501' })
   expect(await desktop.find({ key: 'ask-501' })).toBeDefined()
   expect(await desktop.find({ text: /Почему:/ })).toBeDefined()
 
+  await desktop.press({ key: 'tab-projects' })
+  expect((await desktop.findAll({ type: 'Svg' })).some(svg => String(svg.props.alt).startsWith('Проекты'))).toBe(true)
+
   const terminal = await $.ui.mount({ plugin: 'quipu-memory', surface: 'terminal', component: 'Pane', props: PANE, requestId: 'quipu-memory' })
   expect(await terminal.find({ text: /Search falls back to any term/ })).toBeDefined()
+})
+
+const BAND = { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} } as const
+
+test('the band shows the memory in one line and hides on request', async ($, on) => {
+  stub(on)
+  // What the engine draws in the band when no plugin does.
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine-band' }))
+  const pane = await $.ui.mount({ plugin: 'quipu-memory', surface: 'desktop', component: 'Pane', props: PANE, requestId: 'quipu-memory' })
+  await pane.press({ key: 'load' })
+
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const band = await $.ui.mount({ plugin: 'quipu-memory', surface, component: 'AbovePrompt', props: BAND })
+    expect(await band.find({ key: 'band-open' })).toBeDefined()
+    expect(await band.find({ text: /\+263|\+130/ })).toBeDefined()
+  }
+  const band = await $.ui.mount({ plugin: 'quipu-memory', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  await band.press({ key: 'band-hide' })
+  expect(await band.find({ key: 'band-open' })).toBeUndefined()
+  expect(await band.find({ text: 'engine-band' })).toBeDefined()
+  const again = await $.ui.mount({ plugin: 'quipu-memory', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await again.find({ key: 'band-open' })).toBeUndefined()
 })
