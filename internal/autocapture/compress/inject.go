@@ -229,3 +229,7 @@ func day(ts string) string {
 	}
 	return ts
 }
+
+// SummaryDigest is a session summary reduced to its goal, next steps and what
+// was done — the part that orients a reader.
+func SummaryDigest(content string) string { return digest(content) }

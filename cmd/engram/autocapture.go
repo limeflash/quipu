@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,6 +41,8 @@ func cmdAutocapture(cfg store.Config) {
 		}
 	case "status":
 		autocaptureStatus(cfg.DataDir)
+	case "stats":
+		autocaptureStats(cfg, os.Args[3:])
 	case "context":
 		autocaptureContext(cfg)
 	case "profile":
@@ -72,7 +73,7 @@ func cmdAutocapture(cfg store.Config) {
 			fmt.Printf("%-4s %-28s %6.1fs  in %6d / out %5d  %s\n", status, r.Backend, r.Took.Seconds(), r.Usage.In, r.Usage.Out, r.Detail)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | context | probe | profile [dir]")
+		fmt.Fprintln(os.Stderr, "usage: engram autocapture drain [--dry-run] | status | stats --json [--dir DIR | --project NAME] | context | probe | profile [dir]")
 		exitFunc(1)
 	}
 }
@@ -124,45 +125,25 @@ func autocaptureStatus(dataDir string) {
 		fmt.Printf("models: %s\n", strings.TrimSpace(string(data)))
 	}
 
-	f, err := os.Open(filepath.Join(dataDir, "autocapture.log"))
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	type day struct{ calls, errs, in, out, records int }
+	type day struct{ calls, errs, in, out int }
 	days := map[string]*day{}
 	var order []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	for sc.Scan() {
-		var e struct {
-			At      time.Time `json:"at"`
-			In      int       `json:"in"`
-			Out     int       `json:"out"`
-			Records int       `json:"records"`
-			Error   string    `json:"error"`
-			DryRun  bool      `json:"dry_run"`
-			Model   string    `json:"model"`
-		}
-		if json.Unmarshal(sc.Bytes(), &e) != nil || e.At.IsZero() || e.DryRun || (e.Model == "" && e.Error == "") {
-			continue
-		}
-		k := e.At.Local().Format("2006-01-02")
+	readCallLog(filepath.Join(dataDir, "autocapture.log"), func(at time.Time, in, out int, failed bool) {
+		k := at.Local().Format("2006-01-02")
 		if days[k] == nil {
 			days[k] = &day{}
 			order = append(order, k)
 		}
 		d := days[k]
 		d.calls++
-		d.in += e.In
-		d.out += e.Out
-		d.records += e.Records
-		if e.Error != "" {
+		d.in += in
+		d.out += out
+		if failed {
 			d.errs++
 		}
-	}
+	})
 	for _, k := range order[max(0, len(order)-7):] {
 		d := days[k]
-		fmt.Printf("%s  calls %d (errors %d)  tokens in %d / out %d  records %d\n", k, d.calls, d.errs, d.in, d.out, d.records)
+		fmt.Printf("%s  calls %d (errors %d)  tokens in %d / out %d\n", k, d.calls, d.errs, d.in, d.out)
 	}
 }
