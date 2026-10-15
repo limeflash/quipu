@@ -62,6 +62,10 @@ declare module 'claude-code' {
       refreshedAt: number
       /** The record whose text is open in the list, null for none. */
       expanded: number | null
+      /** The pane's open tab. */
+      tab: 'overview' | 'records' | 'projects'
+      /** The band above the prompt was hidden (kept across sessions in $.store). */
+      bandHidden: boolean
     }
   }
 }
