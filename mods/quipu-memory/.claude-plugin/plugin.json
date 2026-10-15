@@ -1,0 +1,7 @@
+{
+  "name": "quipu-memory",
+  "version": "0.1.0",
+  "author": { "name": "limeflash" },
+  "description": "A live panel of your engram/quipu memory: activity, models, projects and this repo's latest records",
+  "types": "./types/index.d.ts"
+}

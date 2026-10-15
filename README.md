@@ -130,6 +130,8 @@ engram tui
 
 In a session the agent uses the MCP tools; asking "what did we decide about X in project Y" makes it call `mem_search` with `all_projects=true`.
 
+**A panel in Claude Desktop**: [`mods/quipu-memory`](mods/quipu-memory) is a Claude Code mod that draws the memory beside the conversation — today's and the week's records, fourteen days of activity by type with model tokens, which model is writing and which are paused, this repo's latest records (click to read, one press to quote into the prompt) and the most active projects. Install: point `CLAUDE_CODE_PLUGIN_DIRS` at that folder; `/memory` opens it.
+
 ## Configuration
 
 `~/.engram/autocapture.json` — every field optional:
