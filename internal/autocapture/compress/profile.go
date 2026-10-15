@@ -498,3 +498,12 @@ func (d *drainer) refreshProfile(ctx context.Context, project, root string, prof
 	*st = profileState{Root: root, ManifestHash: hash, BuiltAt: d.now, ObsID: id, OneLine: pf.oneLine()}
 	return content, nil
 }
+
+// ProfileLine is a project's profile in one line and the record holding it in
+// full, for displays outside the session-start block ("" when none is built).
+func ProfileLine(dataDir, project string) (int64, string) {
+	if p := loadProfiles(dataDir)[project]; p != nil {
+		return p.ObsID, p.OneLine
+	}
+	return 0, ""
+}
