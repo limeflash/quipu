@@ -75,7 +75,7 @@ Recall test, 48 questions written from six real sessions' dialogue and answered 
 
 ## Install
 
-Windows is what is tested; the code is portable Go. Needs Go 1.25+.
+Windows is what is tested; the code is portable Go. Needs Go 1.26.10+ (pinned in `go.mod`; with the default `GOTOOLCHAIN=auto` an older Go fetches it).
 
 ```powershell
 git clone https://github.com/limeflash/quipu.git

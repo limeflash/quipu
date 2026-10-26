@@ -331,5 +331,29 @@ which the block mentions.
 
 ```bash
 git fetch upstream
-git rebase upstream/main
+git rebase -X renormalize -X ignore-space-at-eol upstream/main
+go test ./...
 ```
+
+The `-X` options keep CRLF/LF differences from turning whole files into
+conflicts (`core.autocrlf` is on here, upstream commits LF). What is left is
+real: so far the `cmdHook` dispatch in `cmd/engram/hook_claude.go`, where
+upstream keeps adding subcommands next to ours, and `README.md`, which is
+ours outright.
+
+`TestDrainAgainstRealStore` (`internal/autocapture/compress/store_test.go`)
+runs two chunks of a session through the real store: sessions, the owner
+checks upstream adds around writes, a continuation rewriting its record, the
+agent's own record left alone, one evolving summary. The other drain tests
+use a fake sink, so this is the one that notices when upstream changes how a
+write is accepted.
+
+Before installing a build on top of a new upstream, run it against a copy
+of the database first (`ENGRAM_DATA_DIR`), since opening the store applies
+upstream's migrations: `autocapture stats --json`, `search`, the
+SessionStart `autocapture context` hook from inside a project, both capture
+hooks, and `mcp --tools=…`.
+
+| Date | Upstream | Notes |
+|---|---|---|
+| 2026-10-26 | v3.6.0 + 13 (`5f1aabe`), 194 commits since 2026-10-07 | conflicts: `cmdHook` dispatch, README; Go toolchain 1.26.10 |
