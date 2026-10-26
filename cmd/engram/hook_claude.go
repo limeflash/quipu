@@ -85,7 +85,7 @@ func cmdHook(args []string) {
 		return
 	}
 	if len(args) != 1 || (args[0] != "claude-pre-tool-use" && args[0] != "codex-pre-tool-use") {
-		fmt.Fprintln(os.Stderr, "usage: engram hook claude-pre-tool-use|claude-post-tool-use|claude-bind-session|codex-pre-tool-use|codex-user-prompt-submit|resolve-hook-project")
+		fmt.Fprintln(os.Stderr, "usage: engram hook claude-pre-tool-use|claude-bind-session|codex-pre-tool-use|codex-user-prompt-submit|resolve-hook-project")
 		exitFunc(1)
 		return
 	}
