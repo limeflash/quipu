@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import type { MemoryDay, MemoryStats } from '../types'
-import { activitySvg, niceMax, projectsSvg, sparkSvg, tilesSvg } from './charts'
+import { activitySvg, niceMax, projectsSvg, sparkSvg } from './charts'
 import { compact, int } from './format'
 
 const DAYS: MemoryDay[] = Array.from({ length: 14 }, (_, i): MemoryDay => ({
@@ -82,20 +82,6 @@ test('the projects chart marks the current project', () => {
   expect(svg).toContain('19,9 тыс.')
 })
 
-test('tiles carry an icon each and wrap two to a row', () => {
-  const svg = tilesSvg(
-    [
-      { icon: 'folder', value: '72', label: 'В проекте', color: '#D97757' },
-      { icon: 'trend', value: '+263', label: 'Сегодня', color: '#10B981' },
-      { icon: 'database', value: '57 тыс.', label: 'Вся память', color: '#6366F1' },
-    ],
-    400,
-    2,
-  )
-  expect((svg.match(/<g transform="translate/g) ?? []).length).toBe(3)
-  expect(svg).toContain('height="140"')
-})
-
 test('the spark line marks today', () => {
   const svg = sparkSvg(DAYS, 70, 16)
   expect((svg.match(/<rect /g) ?? []).length).toBe(14)
@@ -121,9 +107,17 @@ test('the pane loads the stats, switches tabs and opens a record', async ($, on)
   expect(await desktop.find({ text: /Загружаю память/ })).toBeDefined()
   await desktop.press({ key: 'load' })
 
-  expect(await desktop.find({ text: '· engram' })).toBeDefined()
-  const alts = (await desktop.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))
-  expect(alts.some(alt => alt.includes('В проекте: 72'))).toBe(true)
+  expect(await desktop.find({ text: 'engram' })).toBeDefined()
+  // The overview is native cards: the whole memory, the database on disk, today, this project.
+  for (const text of ['Вся память', 'База данных', '525 МБ', 'Сегодня', 'В проекте', '72']) {
+    expect(await desktop.find({ text })).toBeDefined()
+  }
+  expect(await desktop.find({ text: /КБ на запись/ })).toBeDefined()
+  // Every chart is an interactive frame sized to its drawing, so no empty space under it.
+  for (const svg of await desktop.findAll({ type: 'Svg' })) {
+    expect(svg.props.isInteractive).toBe(true)
+    expect(Number(svg.props.height)).toBeGreaterThan(0)
+  }
   expect(await desktop.find({ text: /пауза до/ })).toBeDefined()
   expect(await desktop.find({ key: 'rec-501' })).toBeUndefined()
 

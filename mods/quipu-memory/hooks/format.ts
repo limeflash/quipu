@@ -8,6 +8,7 @@ export const TYPES: readonly { type: string; color: string; label: string }[] = 
   { type: 'config', color: '#0EA5E9', label: 'настройка' },
   { type: 'pattern', color: '#EC4899', label: 'паттерн' },
   { type: 'learning', color: '#84CC16', label: 'урок' },
+  { type: 'change', color: '#64748B', label: 'изменение' },
   { type: 'discovery', color: '#94A3B8', label: 'находка' },
 ]
 

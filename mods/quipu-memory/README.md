@@ -6,7 +6,7 @@ A Claude Code mod for your quipu/engram memory, with its own line icons (a quipu
 
 **A slim panel** beside the conversation, in three tabs:
 
-- **Обзор**: four tiles (this repo, today and the week, the whole memory, the spool), fourteen days of records stacked by type with model tokens as a line (hover a day for its breakdown, calls and errors), and the backend chain — ready, paused until when and why, disabled.
+- **Обзор**: four native cards in the app's own type and theme colours (the whole memory, the database on disk with the average per record, today and the week, this repo), fourteen days of records stacked by type with model tokens as a line (hover a day for its breakdown, calls and errors), and the backend chain — ready, paused until when and why, disabled.
 - **Записи**: the latest session's goal and next steps, this repo's records by type, its twelve latest records — click one to read it, *В запрос* quotes it into the prompt.
 - **Проекты**: the ten most recently active, square-root bars of captured vs other records, the current repo always listed.
 

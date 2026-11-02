@@ -1,6 +1,5 @@
 import type { MemoryDay, MemoryProjectRow } from '../types'
 import { ACCENT, TYPES, ago, compact, dayLabel, int, localDate, parseTime, records, stackKey, typeInfo, weekday, xml } from './format'
-import { iconPaths, type IconName } from './icons'
 
 /**
  * Charts as SVG strings for the `Svg` element. Colours are CSS variables with
@@ -18,44 +17,6 @@ text{font-family:"Segoe UI",-apple-system,Inter,system-ui,sans-serif;fill:var(--
 
 function svg(width: number, height: number, body: string, label: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${xml(label)}">${STYLE}${body}</svg>`
-}
-
-/** An icon of `icons.ts` placed at (x, y), `size` units wide, in `color`. */
-function icon(name: IconName, x: number, y: number, size: number, color: string): string {
-  const paths = iconPaths(name).replace(/class="f"/g, `fill="${color}" stroke="none"`)
-  return `<g transform="translate(${x} ${y}) scale(${size / 24})" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</g>`
-}
-
-export type Tile = { icon: IconName; value: string; label: string; sub?: string; color: string }
-
-/** A grid of tiles, `cols` across: an icon in a tinted square, a label, one big number. */
-export function tilesSvg(tiles: Tile[], width: number, cols = 2): string {
-  const gap = 8
-  const h = 66
-  const rows = Math.ceil(tiles.length / cols)
-  const w = (width - gap * (cols - 1)) / cols
-  const body = tiles
-    .map((t, i) => {
-      const x = (i % cols) * (w + gap)
-      const y = Math.floor(i / cols) * (h + gap)
-      return (
-        `<g><title>${xml(`${t.label}: ${t.value}${t.sub ? ` — ${t.sub}` : ''}`)}</title>` +
-        `<rect class="t" x="${x}" y="${y}" width="${w}" height="${h}" rx="12"/>` +
-        `<rect x="${x + 12}" y="${y + 12}" width="26" height="26" rx="8" fill="${t.color}" opacity=".14"/>` +
-        icon(t.icon, x + 17, y + 17, 16, t.color) +
-        `<text x="${x + 46}" y="${y + 23}" font-size="11.5" class="m">${xml(t.label)}</text>` +
-        `<text x="${x + 46}" y="${y + 43}" font-size="${valueSize(t.value, w - 58)}" font-weight="650">${xml(t.value)}</text>` +
-        (t.sub ? `<text x="${x + 46}" y="${y + 58}" font-size="10.5" class="m">${xml(t.sub)}</text>` : '') +
-        `</g>`
-      )
-    })
-    .join('')
-  return svg(width, rows * h + (rows - 1) * gap, body, tiles.map(t => `${t.label}: ${t.value}`).join('; '))
-}
-
-/** The big number's size: 20px, smaller as the text would outgrow its room. */
-function valueSize(value: string, room: number): number {
-  return Math.max(13, Math.min(20, Math.floor(room / Math.max(1, [...value].length * 0.58))))
 }
 
 /** A round number at or above n for an axis: 1, 2, 2.5, 5 × 10^k. */
