@@ -2,6 +2,7 @@ package compress
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -149,7 +150,20 @@ func RunOnce(ctx context.Context, sink Sink, dataDir string, dryRun bool, out fu
 		return rep, true, err
 	}
 	rep, err = Drain(ctx, sink, gen, cfg, dataDir, time.Now(), dryRun, out)
+	if !dryRun {
+		shrinkWAL(sink)
+	}
 	return rep, true, err
+}
+
+// shrinkWAL folds the write-ahead log into the database and empties the file.
+// SQLite reuses the log but never shrinks it, so engram.db-wal would keep the
+// size of the largest transaction it ever held (413 MB here, after an import
+// and a migration). Best effort: a reader mid-query leaves it to the next drain.
+func shrinkWAL(sink Sink) {
+	if s, ok := sink.(interface{ DB() *sql.DB }); ok {
+		_, _ = s.DB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	}
 }
 
 // Start runs the drain in the background for as long as ctx lives. It is a

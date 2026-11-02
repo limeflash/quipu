@@ -2,8 +2,10 @@ package compress
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,5 +97,32 @@ func TestDrainAgainstRealStore(t *testing.T) {
 	}
 	if summaries != 1 {
 		t.Fatalf("want one evolving session summary, got %d", summaries)
+	}
+}
+
+// A drain leaves engram.db-wal empty, whatever size it had grown to.
+func TestDrainEmptiesTheWriteAheadLog(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(store.FallbackConfig(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateSession("s1", "proj", ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		if _, err := s.AddObservation(store.AddObservationParams{SessionID: "s1", Type: "decision", Title: fmt.Sprintf("note %d", i),
+			Content: strings.Repeat("payload ", 400), Project: "proj", Scope: "project"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wal := filepath.Join(dir, "engram.db-wal")
+	if st, err := os.Stat(wal); err != nil || st.Size() == 0 {
+		t.Fatalf("expected a non-empty WAL before the drain: %v", err)
+	}
+	shrinkWAL(s)
+	if st, err := os.Stat(wal); err == nil && st.Size() != 0 {
+		t.Fatalf("WAL is %d bytes after the drain, want 0", st.Size())
 	}
 }

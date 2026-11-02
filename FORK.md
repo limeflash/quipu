@@ -357,3 +357,17 @@ hooks, and `mcp --tools=…`.
 | Date | Upstream | Notes |
 |---|---|---|
 | 2026-10-26 | v3.6.0 + 13 (`5f1aabe`), 194 commits since 2026-10-07 | conflicts: `cmdHook` dispatch, README; Go toolchain 1.26.10 |
+
+### Write-ahead log size (2026-11-02)
+
+SQLite reuses `engram.db-wal` but never shrinks it, and upstream sets no
+`journal_size_limit`, so the file keeps the size of the largest transaction it
+ever held: here 413 MB beside a 580 MB database, after the claude-mem import
+and the 3.6.0 migrations. After each drain the fork runs
+`PRAGMA wal_checkpoint(TRUNCATE)` (`shrinkWAL` in `compress/runner.go`), which
+folds the log into the database and empties the file; a reader mid-query only
+puts it off to the next drain. The limit itself was tried in `storeDSN` first
+and dropped: upstream keeps the WAL file persistent, and with a limit SQLite
+empties it on close, which `TestMigrateCopyLogicalWAL` rightly reads as WAL
+data lost. `autocapture stats --json` reports the journal as `wal_bytes` next
+to `db_bytes`.

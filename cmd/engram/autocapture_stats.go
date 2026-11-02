@@ -21,6 +21,7 @@ import (
 type statsReport struct {
 	GeneratedAt string        `json:"generated_at"`
 	DBBytes     int64         `json:"db_bytes"`
+	WALBytes    int64         `json:"wal_bytes"`
 	Totals      statsTotals   `json:"totals"`
 	Project     *statsProject `json:"project,omitempty"`
 	Projects    []statsRow    `json:"projects"`
@@ -130,6 +131,9 @@ func buildStats(db *sql.DB, dataDir string, detect func(string) project.Detectio
 	rep := &statsReport{GeneratedAt: now.UTC().Format(time.RFC3339), Projects: []statsRow{}, Models: []statsModel{}}
 	if st, err := os.Stat(filepath.Join(dataDir, "engram.db")); err == nil {
 		rep.DBBytes = st.Size()
+	}
+	if st, err := os.Stat(filepath.Join(dataDir, "engram.db-wal")); err == nil {
+		rep.WALBytes = st.Size()
 	}
 	const live = `deleted_at IS NULL AND type NOT IN ('session_summary','project_profile')`
 
