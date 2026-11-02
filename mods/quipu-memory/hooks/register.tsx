@@ -138,7 +138,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="row" columnGap={2}>
           <Text>
-            <Text color="claude">◆</Text> <Text bold>{compact(s.totals.records)}</Text> <Text dimColor>в памяти · {bytes(s.db_bytes)}</Text>
+            <Text color="claude">◆</Text> <Text bold>{compact(s.totals.records)}</Text> <Text dimColor>в памяти · {bytes(onDisk(s))}</Text>
             {'  '}
             <Text color="success">▲ +{int(today)}</Text> <Text dimColor>сегодня</Text>
             {'  '}
@@ -168,7 +168,7 @@ export const register: Register = on => {
           <Text size="footnote">{writing ? shortModel(writing.name) : 'никто не пишет'}</Text>
           {queueHigh ? <Text size="footnote" color="warning">· очередь {int(s.spool)}</Text> : null}
         </Box>
-        <Text size="footnote" dimColor tabular>{bytes(s.db_bytes)}</Text>
+        <Text size="footnote" dimColor tabular>{bytes(onDisk(s))}</Text>
         <Button key="band-open" plain label="Открыть ›" onPress={() => openPane($)} />
         <Button key="band-hide" plain dimColor label="Скрыть" onPress={() => setBand($, true)} />
       </Box>
@@ -193,7 +193,7 @@ export const register: Register = on => {
             <Text color="claude">◆</Text> Память{s.project ? ` · ${s.project.name}` : ''} <Text dimColor>· {clockTime(at)}</Text>
           </Text>
           <Text>
-            {compact(s.totals.records)} записей · база {bytes(s.db_bytes)} · сегодня +{int(today?.records ?? 0)} · очередь {int(s.spool)} · пишет {writer(s.models)}
+            {compact(s.totals.records)} записей · база {bytes(onDisk(s))} (журнал {bytes(s.wal_bytes ?? 0)}) · сегодня +{int(today?.records ?? 0)} · очередь {int(s.spool)} · пишет {writer(s.models)}
           </Text>
           {(s.project?.recent ?? []).slice(0, 8).map(r => (
             <Text>
@@ -373,12 +373,11 @@ export const register: Register = on => {
     } else {
       const writing = s.models.find(m => m.state === 'ready')
       const queueHigh = s.spool > QUEUE_HIGH
-      const perRecord = s.totals.records ? s.db_bytes / s.totals.records / 1024 : 0
       body = (
         <Box flexDirection="column" rowGap="sm">
           {grid([
             { key: 'c-total', icon: 'layers', tint: INDIGO, label: 'Вся память', value: compact(s.totals.records), sub: `${int(s.totals.projects)} ${plural(s.totals.projects, ['проект', 'проекта', 'проектов'])} · автозахват ${compact(s.totals.captured)}` },
-            { key: 'c-db', icon: 'disk', tint: SKY, label: 'База данных', value: bytes(s.db_bytes), sub: `engram.db · ≈ ${perRecord.toFixed(1).replace('.', ',')} КБ на запись` },
+            { key: 'c-db', icon: 'disk', tint: SKY, label: 'База на диске', value: bytes(onDisk(s)), sub: `файл ${bytes(s.db_bytes)} · журнал ${bytes(s.wal_bytes ?? 0)}` },
             { key: 'c-today', icon: 'trend', tint: GREEN, label: 'Сегодня', value: `+${int(today)}`, valueColor: 'success', sub: `за неделю ${compact(week)}` },
             p
               ? { key: 'c-project', icon: 'folder', tint: ACCENT, label: 'В проекте', value: int(p.records), sub: `автозахват ${int(p.captured)}` }
@@ -419,6 +418,11 @@ export const register: Register = on => {
       </Box>
     )
   })
+}
+
+/** The database on disk: the file and its write-ahead journal. */
+function onDisk(s: MemoryStats): number {
+  return s.db_bytes + (s.wal_bytes ?? 0)
 }
 
 /** The height `charts.ts` declares on its root `<svg>`, so the frame fits the drawing. */
@@ -468,7 +472,7 @@ function modelNote(m: MemoryModel, now: number): string {
 
 function statusLine(s: MemoryStats): string {
   const today = s.days[s.days.length - 1]?.records ?? 0
-  return `🧠 ${compact(s.totals.records)} · 💾 ${bytes(s.db_bytes)} · 📈 +${int(today)} сегодня · ⚡ ${writer(s.models)}${s.spool > QUEUE_HIGH ? ` · 📥 ${int(s.spool)}` : ''}`
+  return `🧠 ${compact(s.totals.records)} · 💾 ${bytes(onDisk(s))} · 📈 +${int(today)} сегодня · ⚡ ${writer(s.models)}${s.spool > QUEUE_HIGH ? ` · 📥 ${int(s.spool)}` : ''}`
 }
 
 /** The digest's English labels, in Russian, as Markdown: the goal and what is next. */

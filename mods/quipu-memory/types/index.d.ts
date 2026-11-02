@@ -2,6 +2,8 @@
 export type MemoryStats = {
   generated_at: string
   db_bytes: number
+  /** engram.db-wal; absent from builds before it was reported. */
+  wal_bytes?: number
   totals: { records: number; captured: number; agent: number; imported: number; projects: number }
   project?: MemoryProject
   projects: MemoryProjectRow[]

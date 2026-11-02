@@ -18,6 +18,7 @@ const DAYS: MemoryDay[] = Array.from({ length: 14 }, (_, i): MemoryDay => ({
 const STATS: MemoryStats = {
   generated_at: '2026-10-15T12:00:00Z',
   db_bytes: 550_858_752,
+  wal_bytes: 433_003_792,
   totals: { records: 56_947, captured: 7_875, agent: 1, imported: 49_071, projects: 53 },
   project: {
     name: 'engram',
@@ -109,10 +110,12 @@ test('the pane loads the stats, switches tabs and opens a record', async ($, on)
 
   expect(await desktop.find({ text: 'engram' })).toBeDefined()
   // The overview is native cards: the whole memory, the database on disk, today, this project.
-  for (const text of ['Вся память', 'База данных', '525 МБ', 'Сегодня', 'В проекте', '72']) {
+  for (const text of ['Вся память', 'База на диске', 'Сегодня', 'В проекте', '72']) {
     expect(await desktop.find({ text })).toBeDefined()
   }
-  expect(await desktop.find({ text: /КБ на запись/ })).toBeDefined()
+  // The card's value is the file and its journal together, the line under it each of them.
+  expect(await desktop.find({ text: '938 МБ' })).toBeDefined()
+  expect(await desktop.find({ text: 'файл 525 МБ · журнал 413 МБ' })).toBeDefined()
   // Every chart is an interactive frame sized to its drawing, so no empty space under it.
   for (const svg of await desktop.findAll({ type: 'Svg' })) {
     expect(svg.props.isInteractive).toBe(true)
